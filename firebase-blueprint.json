@@ -1,0 +1,80 @@
+{
+  "entities": {
+    "users": {
+      "title": "User Profile",
+      "description": "User profile information",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "email": { "type": "string" },
+        "name": { "type": "string" },
+        "phone": { "type": "string" },
+        "role": { "type": "string", "enum": ["admin", "user"] },
+        "location": { "type": "string" },
+        "createdAt": { "type": "string" }
+      },
+      "required": ["email", "name", "role"]
+    },
+    "orders": {
+      "title": "Order",
+      "description": "Customer order details",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "userId": { "type": "string" },
+        "userEmail": { "type": "string" },
+        "userName": { "type": "string" },
+        "userPhone": { "type": "string" },
+        "packageId": { "type": "string" },
+        "packageName": { "type": "string" },
+        "amount": { "type": "number" },
+        "paymentMethod": { "type": "string" },
+        "transactionId": { "type": "string" },
+        "status": { "type": "string", "enum": ["pending", "approved", "rejected", "completed"] },
+        "date": { "type": "string" }
+      },
+      "required": ["userId", "packageId", "amount", "status"]
+    },
+    "support_messages": {
+      "title": "Support Message",
+      "description": "Chat messages between user and support/admin",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "user_id": { "type": "string" },
+        "sender_role": { "type": "string", "enum": ["admin", "user"] },
+        "message": { "type": "string" },
+        "is_read": { "type": "boolean" },
+        "created_at": { "type": "string" }
+      },
+      "required": ["user_id", "sender_role", "message"]
+    },
+    "system_settings": {
+      "title": "System Settings",
+      "description": "Global website settings",
+      "type": "object",
+      "properties": {
+        "facebook": { "type": "string" },
+        "youtube": { "type": "string" }
+      }
+    }
+  },
+  "firestore": {
+    "/users/{userId}": {
+      "schema": "users",
+      "description": "User profile documents"
+    },
+    "/orders/{orderId}": {
+      "schema": "orders",
+      "description": "Client service orders"
+    },
+    "/support_messages/{messageId}": {
+      "schema": "support_messages",
+      "description": "Real-time support and chat messages"
+    },
+    "/system_settings/{settingId}": {
+      "schema": "system_settings",
+      "description": "Global site settings"
+    }
+  }
+}
