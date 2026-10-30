@@ -10,6 +10,7 @@ service cloud.firestore {
       return isSignedIn() && (
         request.auth.token.email == 'shihabno.18@gmail.com' ||
         request.auth.token.email == 'info@automateiq.xyz' ||
+        request.auth.token.email == 'admin@gmail.com' ||
         exists(/databases/$(database)/documents/admins/$(request.auth.uid))
       );
     }

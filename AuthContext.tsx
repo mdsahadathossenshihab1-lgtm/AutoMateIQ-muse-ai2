@@ -173,7 +173,14 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
     messages, 
     siteSettings, 
     isLoading,
-    loginUser: db.login,
+    loginUser: async (email: string, pass: string) => {
+      const res = await db.login(email, pass);
+      if (res.success && res.data) {
+        setUser(res.data);
+        await refreshData(res.data);
+      }
+      return res;
+    },
     loginWithGoogle: db.loginWithGoogle,
     signupUser: async (data) => {
       const res = await db.signup(data);
