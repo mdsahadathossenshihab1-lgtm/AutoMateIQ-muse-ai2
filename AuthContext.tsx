@@ -215,7 +215,7 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
       setOrders(p => [newOrder, ...p]);
       await db.addOrder(newOrder); 
     },
-    updateOrderStatus: async (id: string, s: 'approved' | 'rejected' | 'completed') => { 
+    updateOrderStatus: async (id: string, s) => {
       setOrders(p => p.map(o => o.id === id ? {...o, status: s} : o));
       return await db.updateOrderStatus(id, s);
     },

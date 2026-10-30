@@ -36,13 +36,53 @@ service cloud.firestore {
     }
 
     // Orders collection
+    // Status changes are admin-only server-side: a client may update
+    // its own detail fields, but may NOT change order status.
+    // (UI buttons alone never grant this — these rules are the gate.)
     match /orders/{orderId} {
       allow get: if isSignedIn() && (resource.data.userId == request.auth.uid || isAdmin());
       allow list: if isSignedIn() && (resource.data.userId == request.auth.uid || isAdmin());
       allow create: if isSignedIn() && request.resource.data.userId == request.auth.uid;
       allow update: if isSignedIn() && (
-        isAdmin() || 
-        (resource.data.userId == request.auth.uid && request.resource.data.userId == request.auth.uid)
+        isAdmin() ||
+        (resource.data.userId == request.auth.uid
+          && request.resource.data.userId == request.auth.uid
+          && request.resource.data.status == resource.data.status)
+      );
+      allow delete: if isAdmin();
+    }
+
+    // Messenger Leads — a business customer's OWN Messenger customers.
+    // Isolation boundary: ownerId. A client may only read/write its
+    // own leads, and may never change a lead's ownerId. Admins may
+    // read all leads (for support), but bot writes must set the
+    // correct ownerId + pageId — the rules cannot verify a Page
+    // belongs to a business on their own, so the bot/server must
+    // validate businessId + pageId before writing.
+    match /messenger_leads/{leadId} {
+      allow get: if isSignedIn() && (resource.data.ownerId == request.auth.uid || isAdmin());
+      allow list: if isSignedIn() && (resource.data.ownerId == request.auth.uid || isAdmin());
+      allow create: if isSignedIn() && (request.resource.data.ownerId == request.auth.uid || isAdmin());
+      allow update: if isSignedIn() && (
+        isAdmin() ||
+        (resource.data.ownerId == request.auth.uid
+          && request.resource.data.ownerId == resource.data.ownerId)
+      );
+      allow delete: if isAdmin();
+    }
+
+    // Wallet recharges — pending until admin approval. A client may
+    // create its own pending recharge and read its own history, but
+    // may NOT approve/reject (change status) itself.
+    match /wallet_recharges/{rechargeId} {
+      allow get: if isSignedIn() && (resource.data.userId == request.auth.uid || isAdmin());
+      allow list: if isSignedIn() && (resource.data.userId == request.auth.uid || isAdmin());
+      allow create: if isSignedIn() && request.resource.data.userId == request.auth.uid
+        && request.resource.data.status == 'pending';
+      allow update: if isSignedIn() && (
+        isAdmin() ||
+        (resource.data.userId == request.auth.uid
+          && request.resource.data.status == resource.data.status)
       );
       allow delete: if isAdmin();
     }

@@ -3,8 +3,13 @@ import { useAuth } from '../AuthContext';
 import { useLanguage } from '../LanguageContext';
 import { CONTACT_INFO } from '../constants';
 import { LogOut, Package, CheckCircle, Clock, XCircle, LayoutDashboard, Users, ShoppingCart, User as UserIcon, Send, Link as LinkIcon, Calendar, X, Mail, MessageSquare, ExternalLink, Copy, Check, Search, ArrowLeft, ArrowRight, Phone, Award, Loader2, Zap, Coins, MessageCircle, Settings, Save, AlertTriangle, Terminal, FileCode, Server, Menu, FileText, HelpCircle, BellRing, Activity, MapPin, BarChart3, AlertOctagon, Volume2 } from 'lucide-react';
-import { Order, User, SupportMessage } from '../types';
+import { Order, User, SupportMessage, OrderStatus } from '../types';
 import Logo from './Logo';
+import MessengerLeads from './MessengerLeads';
+import AdminPanel from './AdminPanel';
+import Wallet from './Wallet';
+import OrderDetail from './OrderDetail';
+import { useLiveHandoverCount } from '../services/messengerLeadsFirestore';
 
 interface DashboardProps {
   onClose: () => void;
@@ -272,7 +277,10 @@ const ClientSubmissionForm = ({ order, onSubmit }: { order: Order, onSubmit: (da
 const Dashboard: React.FC<DashboardProps> = ({ onClose, onNavigateToPricing }) => {
   const { user, users, orders, logout, updateOrderStatus, updateOrderDetails, isLoading, messages, sendSupportMessage, markMessagesRead, siteSettings, updateSiteSettings, requestNotificationPermission } = useAuth();
   const { t } = useLanguage();
-  const [activeTab, setActiveTab] = useState<'users' | 'profile' | 'support' | 'settings'>('profile');
+  const [activeTab, setActiveTab] = useState<'users' | 'profile' | 'support' | 'settings' | 'messenger' | 'admin' | 'wallet'>('profile');
+  const [selectedOrderDetail, setSelectedOrderDetail] = useState<Order | null>(null);
+  const [orderFilter, setOrderFilter] = useState<'all' | 'pending' | 'in_progress' | 'completed' | 'cancelled'>('all');
+  const liveHandoverCount = useLiveHandoverCount(user?.id || '');
   const [searchTerm, setSearchTerm] = useState('');
   
   const [selectedUser, setSelectedUser] = useState<User | null>(null);
@@ -304,7 +312,7 @@ const Dashboard: React.FC<DashboardProps> = ({ onClose, onNavigateToPricing }) =
     }
   };
 
-  useEffect(() => { if (user && user.role !== 'admin' && (activeTab === 'users' || activeTab === 'settings')) { setActiveTab('profile'); } }, [user, activeTab]);
+  useEffect(() => { if (user && user.role !== 'admin' && (activeTab === 'users' || activeTab === 'settings' || activeTab === 'admin')) { setActiveTab('profile'); } }, [user, activeTab]);
   useEffect(() => { setSettingsFb(siteSettings.facebook); setSettingsYt(siteSettings.youtube); }, [siteSettings]);
 
   // Actions
@@ -405,7 +413,20 @@ const Dashboard: React.FC<DashboardProps> = ({ onClose, onNavigateToPricing }) =
              Pending
           </span>
         );
-      case 'approved': 
+      case 'in_progress':
+        return (
+          <span className="px-3 py-1 rounded-full bg-blue-50 text-blue-600 text-xs font-bold border border-blue-100 flex items-center gap-2 shadow-sm">
+             <span className="w-2 h-2 rounded-full bg-blue-500 animate-pulse"></span>
+             In Progress
+          </span>
+        );
+      case 'cancelled':
+        return (
+          <span className="px-3 py-1 rounded-full bg-red-50 text-red-600 text-xs font-bold border border-red-100 flex items-center gap-2 shadow-sm">
+             <XCircle size={12} /> Cancelled
+          </span>
+        );
+      case 'approved':
         if (order.startDate) return (
           <span className="px-3 py-1 rounded-full bg-blue-50 text-blue-600 text-xs font-bold border border-blue-100 flex items-center gap-2 shadow-sm">
              <span className="w-2 h-2 rounded-full bg-blue-500 animate-pulse"></span>
@@ -470,8 +491,10 @@ const Dashboard: React.FC<DashboardProps> = ({ onClose, onNavigateToPricing }) =
           {user?.role === 'admin' ? (
             <>
               <p className="px-4 text-[10px] font-bold text-slate-400 uppercase tracking-widest mb-2">{t('dashboard.manage')}</p>
+              <NavButton id="admin" icon={Users} label="Admin Panel" badge={pendingOrdersCount} />
               <NavButton id="users" icon={Users} label={t('dashboard.users_orders')} badge={pendingOrdersCount} />
               <NavButton id="support" icon={MessageCircle} label={t('dashboard.inbox')} badge={totalUnreadCount} />
+              <NavButton id="messenger" icon={Users} label="Messenger Leads" badge={liveHandoverCount} />
               <NavButton id="settings" icon={Settings} label={t('dashboard.settings')} />
             </>
           ) : (
@@ -479,6 +502,8 @@ const Dashboard: React.FC<DashboardProps> = ({ onClose, onNavigateToPricing }) =
               <p className="px-4 text-[10px] font-bold text-slate-400 uppercase tracking-widest mb-2">{t('dashboard.menu')}</p>
               <NavButton id="profile" icon={LayoutDashboard} label={t('nav.dashboard')} />
               <NavButton id="support" icon={MessageCircle} label={t('dashboard.inbox')} />
+              <NavButton id="messenger" icon={Users} label="Messenger Leads" badge={liveHandoverCount} />
+              <NavButton id="wallet" icon={Coins} label="Wallet" />
             </>
           )}
         </div>
@@ -538,7 +563,7 @@ const Dashboard: React.FC<DashboardProps> = ({ onClose, onNavigateToPricing }) =
             <div className="flex justify-between items-end mb-10">
               <div>
                 <h1 className="text-3xl font-bold text-slate-900 tracking-tight">
-                  {activeTab === 'users' ? t('dashboard.users_orders') : activeTab === 'support' ? t('dashboard.inbox') : activeTab === 'settings' ? t('dashboard.settings') : `${t('dashboard.welcome')}, ${(user?.name || 'User').split(' ')[0]}`}
+                  {activeTab === 'users' ? t('dashboard.users_orders') : activeTab === 'support' ? t('dashboard.inbox') : activeTab === 'messenger' ? 'Messenger Leads' : activeTab === 'admin' ? 'Admin Panel' : activeTab === 'wallet' ? 'Wallet' : activeTab === 'settings' ? t('dashboard.settings') : `${t('dashboard.welcome')}, ${(user?.name || 'User').split(' ')[0]}`}
                 </h1>
                 <p className="text-slate-500 mt-1">{t('dashboard.manage_account')}</p>
               </div>
@@ -616,8 +641,18 @@ const Dashboard: React.FC<DashboardProps> = ({ onClose, onNavigateToPricing }) =
 
                 <div>
                   <h2 className="text-xl font-bold text-slate-900 mb-6 flex items-center gap-2"><BarChart3 className="text-slate-400"/> {t('dashboard.recent_orders')}</h2>
-                  
-                  {/* Clean List View for Orders */}
+
+                  {/* Status filter — legacy 'approved' counts as In Progress,
+                      legacy 'rejected' counts as Cancelled, so old orders
+                      still appear under the new filter names. */}
+                  <div className="flex flex-wrap gap-2 mb-5">
+                    {(['all', 'pending', 'in_progress', 'completed', 'cancelled'] as const).map((f) => (
+                      <button key={f} onClick={() => setOrderFilter(f)} className={`px-4 py-2 rounded-xl text-sm font-bold border transition-colors ${orderFilter === f ? 'bg-blue-600 text-white border-blue-600' : 'bg-white text-slate-600 border-slate-200 hover:border-blue-300'}`}>
+                        {f === 'all' ? 'All' : f === 'in_progress' ? 'In Progress' : f === 'pending' ? 'Pending' : f === 'completed' ? 'Completed' : 'Cancelled'}
+                      </button>
+                    ))}
+                  </div>
+
                   <div className="grid grid-cols-1 gap-4">
                      {myOrders.length === 0 && (
                         <div className="p-12 text-center text-slate-400 bg-white rounded-3xl border border-slate-200">
@@ -626,8 +661,13 @@ const Dashboard: React.FC<DashboardProps> = ({ onClose, onNavigateToPricing }) =
                         </div>
                      )}
 
-                     {myOrders.map(order => (
-                       <div key={order.id} className="bg-white p-6 rounded-2xl border border-slate-100 shadow-[0_2px_10px_rgb(0,0,0,0.02)] hover:shadow-md transition-shadow flex flex-col md:flex-row md:items-center justify-between gap-4">
+                     {myOrders.filter((order) => {
+                       if (orderFilter === 'all') return true;
+                       if (orderFilter === 'in_progress') return order.status === 'in_progress' || order.status === 'approved';
+                       if (orderFilter === 'cancelled') return order.status === 'cancelled' || order.status === 'rejected';
+                       return order.status === orderFilter;
+                     }).map(order => (
+                       <button key={order.id} onClick={() => setSelectedOrderDetail(order)} className="bg-white p-6 rounded-2xl border border-slate-100 shadow-[0_2px_10px_rgb(0,0,0,0.02)] hover:shadow-md hover:border-blue-300 transition-all flex flex-col md:flex-row md:items-center justify-between gap-4 text-left w-full">
                           <div className="flex items-center gap-4">
                              <div className="w-12 h-12 bg-slate-50 rounded-xl flex items-center justify-center text-slate-400 border border-slate-100">
                                 <Package size={20} />
@@ -638,10 +678,12 @@ const Dashboard: React.FC<DashboardProps> = ({ onClose, onNavigateToPricing }) =
                                   <span className="font-mono">#{order.id.slice(-6)}</span>
                                   <span>•</span>
                                   <span>{new Date(order.date).toLocaleDateString()}</span>
+                                  <span>•</span>
+                                  <span className="text-blue-600 font-bold">View detail →</span>
                                 </div>
                              </div>
                           </div>
-                          
+
                           <div className="flex items-center gap-6 md:justify-end flex-1">
                              <div>
                                 <p className="text-xs text-slate-400 font-bold uppercase tracking-wider mb-1 text-right">Amount</p>
@@ -649,7 +691,7 @@ const Dashboard: React.FC<DashboardProps> = ({ onClose, onNavigateToPricing }) =
                              </div>
                              <div>{renderStatusBadge(order)}</div>
                           </div>
-                       </div>
+                       </button>
                      ))}
                   </div>
                 </div>
@@ -749,6 +791,7 @@ const Dashboard: React.FC<DashboardProps> = ({ onClose, onNavigateToPricing }) =
                             <div><p className="text-xs font-bold text-slate-500 uppercase mb-1">Date</p><p className="text-lg text-slate-800">{new Date(order.date).toLocaleDateString()}</p></div>
                           </div>
                           <div className="flex flex-wrap gap-3 justify-end">
+                            <button onClick={() => setSelectedOrderDetail(order)} className="px-6 py-3 rounded-xl font-bold text-blue-600 bg-blue-50 hover:bg-blue-100 border border-blue-200">View detail</button>
                             {order.status === 'pending' && <><button onClick={() => handleReject(order.id)} className="px-6 py-3 rounded-xl font-bold text-red-600 bg-red-50 hover:bg-red-100 border border-red-200">Reject</button><button onClick={() => handleApproveClick(order)} className="px-6 py-3 rounded-xl font-bold text-white bg-blue-600 hover:bg-blue-500 shadow-lg">Approve & Send Link</button></>}
                             {order.status === 'approved' && !order.startDate && <div className="w-full flex justify-between items-center">{!order.isDetailsSubmitted ? <span className="text-orange-500 font-bold text-sm bg-orange-50 px-4 py-2 rounded-lg border border-orange-200 animate-pulse">Waiting for Client Submission...</span> : <button onClick={() => handleReviewClick(order)} className="px-6 py-3 rounded-xl font-bold text-white bg-indigo-600 hover:bg-indigo-500 shadow-lg flex items-center gap-2 ml-auto"><FileText size={18}/> Review Client Details</button>}</div>}
                             {(order.startDate || order.status === 'completed') && order.status !== 'completed' && <button onClick={() => handleComplete(order.id)} className="px-6 py-3 rounded-xl font-bold text-slate-500 bg-white hover:bg-slate-50 border border-slate-200">Archive Order</button>}
@@ -801,6 +844,33 @@ const Dashboard: React.FC<DashboardProps> = ({ onClose, onNavigateToPricing }) =
               </div>
             )}
 
+            {/* MESSENGER LEADS VIEW — NEW, separate from support Inbox.
+                Support Inbox = business customer <-> developer team.
+                Messenger Leads = business customer <-> THEIR OWN
+                Messenger customers, scoped by logged-in ownerId. */}
+            {activeTab === 'messenger' && (
+              <div className="animate-fade-in-up">
+                <MessengerLeads />
+              </div>
+            )}
+
+            {/* ADMIN PANEL — admin only (see AdminPanel.tsx for the
+                role gate + server-side rules note). Clients never
+                see this tab; the guard above also resets it. */}
+            {activeTab === 'admin' && user?.role === 'admin' && (
+              <div className="animate-fade-in-up">
+                <AdminPanel onOpenSupportThread={(customer) => { setSelectedChatUser(customer); setActiveTab('support'); }} />
+              </div>
+            )}
+
+            {/* WALLET — client only. Balance is approved recharges
+                only; new recharges stay Pending until admin approval. */}
+            {activeTab === 'wallet' && user?.role !== 'admin' && (
+              <div className="animate-fade-in-up">
+                <Wallet />
+              </div>
+            )}
+
             {/* MESSAGES VIEW */}
             {activeTab === 'support' && (
               <div className="h-[700px] animate-fade-in-up">
@@ -838,6 +908,23 @@ const Dashboard: React.FC<DashboardProps> = ({ onClose, onNavigateToPricing }) =
 
       <ApproveModal isOpen={isApproveModalOpen} onClose={() => setIsApproveModalOpen(false)} order={selectedOrder} onApprove={confirmApprove} />
       <ReviewModal isOpen={isReviewModalOpen} onClose={() => setIsReviewModalOpen(false)} order={selectedOrder} onAction={confirmReviewAction} />
+      {selectedOrderDetail && (
+        <OrderDetail
+          order={selectedOrderDetail}
+          isAdmin={user?.role === 'admin'}
+          onClose={() => setSelectedOrderDetail(null)}
+          onSaveDetails={async (updates) => { await updateOrderDetails(selectedOrderDetail.id, updates); setSelectedOrderDetail({ ...selectedOrderDetail, ...updates }); }}
+          onStatusChange={user?.role === 'admin' ? async (s: OrderStatus) => { await updateOrderStatus(selectedOrderDetail.id, s); setSelectedOrderDetail({ ...selectedOrderDetail, status: s }); } : undefined}
+          onOpenSupportThread={() => {
+            if (user?.role === 'admin') {
+              const cust = users.find((u) => u.id === selectedOrderDetail.userId);
+              if (cust) setSelectedChatUser(cust);
+            }
+            setSelectedOrderDetail(null);
+            setActiveTab('support');
+          }}
+        />
+      )}
     </div>
   );
 };

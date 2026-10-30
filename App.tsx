@@ -7,6 +7,7 @@ import ChatAssistant from './components/ChatAssistant';
 import OrderModal from './components/OrderModal';
 import ServiceDetailModal from './components/ServiceDetailModal';
 import Dashboard from './components/Dashboard';
+import ContentPages, { ContentPageId } from './components/ContentPages';
 import AuthModal from './components/AuthModal';
 import ApiTopupSection from './components/ApiTopupSection';
 import AiFeaturesSection from './components/AiFeaturesSection';
@@ -29,6 +30,7 @@ const AppContent: React.FC = () => {
   const [isDetailModalOpen, setIsDetailModalOpen] = useState(false);
   const [isDashboardOpen, setIsDashboardOpen] = useState(false);
   const [isAuthModalOpen, setIsAuthModalOpen] = useState(false);
+  const [contentPage, setContentPage] = useState<ContentPageId | null>(null);
   
   // Contact Form
   const [contactName, setContactName] = useState('');
@@ -636,15 +638,16 @@ const AppContent: React.FC = () => {
                 <li><button onClick={() => window.scrollTo(0,0)} className="text-slate-400 hover:text-blue-400 text-sm transition-colors">{t('nav.home')}</button></li>
                 <li><button onClick={() => document.getElementById('services')?.scrollIntoView()} className="text-slate-400 hover:text-blue-400 text-sm transition-colors">{t('nav.services')}</button></li>
                 <li><button onClick={scrollToPricing} className="text-slate-400 hover:text-blue-400 text-sm transition-colors">{t('nav.pricing')}</button></li>
+                <li><button onClick={() => setContentPage('faq')} className="text-slate-400 hover:text-blue-400 text-sm transition-colors">FAQ</button></li>
               </ul>
             </div>
 
             <div>
               <h4 className="font-bold text-white mb-6 uppercase tracking-wider text-xs">Legal</h4>
               <ul className="space-y-3">
-                <li><a href="#" className="text-slate-400 hover:text-blue-400 text-sm transition-colors">Privacy Policy</a></li>
-                <li><a href="#" className="text-slate-400 hover:text-blue-400 text-sm transition-colors">Terms of Service</a></li>
-                <li><a href="#" className="text-slate-400 hover:text-blue-400 text-sm transition-colors">Cookie Policy</a></li>
+                <li><button onClick={() => setContentPage('privacy')} className="text-slate-400 hover:text-blue-400 text-sm transition-colors">Privacy Policy &amp; Terms</button></li>
+                <li><button onClick={() => setContentPage('refund')} className="text-slate-400 hover:text-blue-400 text-sm transition-colors">Refund &amp; Renewal Terms</button></li>
+                <li><button onClick={() => setContentPage('faq')} className="text-slate-400 hover:text-blue-400 text-sm transition-colors">FAQ</button></li>
               </ul>
             </div>
           </div>
@@ -670,6 +673,7 @@ const AppContent: React.FC = () => {
 
       {/* Modals */}
       <AuthModal isOpen={isAuthModalOpen} onClose={() => setIsAuthModalOpen(false)} onSuccess={handleAuthSuccess} />
+      {contentPage && <ContentPages page={contentPage} onClose={() => setContentPage(null)} />}
       <OrderModal isOpen={isOrderModalOpen} onClose={() => setIsOrderModalOpen(false)} pkgId={selectedPackageId} customAmount={customAmount} onSuccess={handleOrderSuccess} />
       <ServiceDetailModal isOpen={isDetailModalOpen} onClose={() => setIsDetailModalOpen(false)} serviceId={selectedServiceId} />
       <ChatAssistant />

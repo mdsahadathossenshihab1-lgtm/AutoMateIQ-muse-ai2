@@ -61,6 +61,18 @@ export interface User {
   location?: string;
 }
 
+export type OrderStatus =
+  | 'pending'
+  | 'in_progress'
+  | 'approved'
+  | 'rejected'
+  | 'completed'
+  | 'cancelled';
+
+/** New flow: Pending -> In Progress -> Completed / Cancelled.
+ *  'approved' / 'rejected' are legacy statuses from the original app
+ *  and are kept for existing orders only; new admin actions should
+ *  use in_progress / completed / cancelled. */
 export interface Order {
   id: string;
   userId: string;
@@ -72,18 +84,40 @@ export interface Order {
   paymentMethod: string;
   senderPhone: string;
   trxId: string;
-  status: 'pending' | 'approved' | 'rejected' | 'completed';
+  status: OrderStatus;
   date: string;
   adminFbLink?: string;
-  clientDocLink?: string;      
-  clientRequirements?: string; 
-  clientPageLink?: string;     
-  clientEmail?: string;        
-  clientWhatsapp?: string;     
-  isDetailsSubmitted?: boolean; 
+  clientDocLink?: string;
+  clientRequirements?: string;
+  clientPageLink?: string;
+  clientEmail?: string;
+  clientWhatsapp?: string;
+  /** Detail-collection fields for the order detail view. */
+  accessNotes?: string;
+  followUpInfo?: string;
+  isDetailsSubmitted?: boolean;
   startDate?: string;
   completionDate?: string;
   adminMessage?: string;
+}
+
+/**
+ * Wallet recharge request. A recharge is NEVER auto-verified:
+ * it stays 'pending' until an admin approves or rejects it in the
+ * Admin Panel. Balance = sum of approved recharges only (usage
+ * deduction is not yet implemented — see Wallet.tsx).
+ */
+export interface WalletRecharge {
+  id: string;
+  userId: string;
+  userName?: string;
+  amount: number;
+  paymentMethod: 'bkash' | 'nagad';
+  senderPhone: string;
+  trxId: string;
+  status: 'pending' | 'approved' | 'rejected';
+  date: string;
+  adminNote?: string;
 }
 
 export interface SupportMessage {
@@ -93,6 +127,54 @@ export interface SupportMessage {
   message: string;
   is_read: boolean;
   created_at: string;
+}
+
+/* ------------------------------------------------------------------
+ * Messenger Leads — NEW, separate from the support inbox.
+ * The support inbox (SupportMessage) is business customer <-> the
+ * AutoMateIQ developer team. Messenger leads are a business
+ * customer's OWN Messenger customers (people who messaged that
+ * business's Page). The two must never be mixed: a lead belongs to
+ * exactly one business account, identified by ownerId (the logged-in
+ * business customer's user id) and, when known, sourcePageId.
+ * ------------------------------------------------------------------ */
+export type MessengerLeadStatus =
+  | 'new'
+  | 'bot_replied'
+  | 'handover'
+  | 'owner_replied'
+  | 'closed';
+
+export type MessengerSender = 'customer' | 'bot' | 'owner';
+
+export interface MessengerMessage {
+  id: string;
+  sender: MessengerSender;
+  text: string;
+  created_at: string;
+  /** Present only when a website reply could not be delivered to
+   *  Messenger because no reply webhook is configured. */
+  delivery?: 'delivered' | 'pending_send';
+}
+
+export interface MessengerLead {
+  id: string;
+  /** Logged-in business customer who owns this lead. NEVER show a
+   *  lead to a different ownerId. */
+  ownerId: string;
+  /** Facebook Page this lead messaged (display name, e.g. the
+   *  business's Page name). */
+  sourcePage: string;
+  sourcePageId?: string;
+  name: string;
+  /** Messenger PSID. Masked in the UI; the full value is only used
+   *  internally when posting a reply to the reply webhook. */
+  psid: string;
+  status: MessengerLeadStatus;
+  lastMessage: string;
+  updated_at: string;
+  messages: MessengerMessage[];
+  note?: string;
 }
 
 export interface SiteSettings {
@@ -113,7 +195,7 @@ export interface AuthContextType {
   loginWithGoogle?: () => Promise<{ success: boolean; message?: string }>;
   logout: () => void;
   addOrder: (order: Omit<Order, 'id' | 'date' | 'status'>) => Promise<void>;
-  updateOrderStatus: (orderId: string, status: 'approved' | 'rejected' | 'completed') => Promise<boolean>;
+  updateOrderStatus: (orderId: string, status: OrderStatus) => Promise<boolean>;
   updateOrderDetails: (orderId: string, updates: Partial<Order>) => Promise<void>;
   sendSupportMessage: (text: string, targetUserId?: string) => Promise<boolean>;
   markMessagesRead: (userId: string) => Promise<void>;

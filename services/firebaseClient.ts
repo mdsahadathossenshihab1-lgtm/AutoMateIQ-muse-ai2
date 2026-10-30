@@ -22,7 +22,7 @@ import {
   getDocFromServer
 } from 'firebase/firestore';
 import firebaseConfig from '../firebase-applet-config.json';
-import { User, Order, SupportMessage, SiteSettings } from '../types';
+import { User, Order, SupportMessage, SiteSettings, WalletRecharge } from '../types';
 
 // Initialize Firebase
 const app = !getApps().length ? initializeApp(firebaseConfig) : getApp();
@@ -310,6 +310,47 @@ export const db = {
       return true;
     } catch (e) {
       handleFirestoreError(e, OperationType.UPDATE, `orders/${orderId}`);
+      return false;
+    }
+  },
+
+  // 6b. Wallet recharges — Firestore-first, localStorage fallback lives
+  // in services/wallet.ts. Recharges are Pending until an admin
+  // approves/rejects them; nothing here auto-verifies a payment.
+  // TODO: if Firestore rules deny a write, wallet.ts falls back to
+  // per-account localStorage and the admin queue on that device only.
+  getWalletRecharges: async (userId?: string): Promise<WalletRecharge[]> => {
+    try {
+      const col = collection(dbFirestore, 'wallet_recharges');
+      const q = userId ? query(col, where('userId', '==', userId), orderBy('date', 'desc')) : query(col, orderBy('date', 'desc'));
+      const snap = await getDocs(q);
+      return snap.docs.map(d => d.data() as WalletRecharge);
+    } catch (e) {
+      try {
+        const col = collection(dbFirestore, 'wallet_recharges');
+        const q = userId ? query(col, where('userId', '==', userId)) : query(col);
+        const snap = await getDocs(q);
+        return (snap.docs.map(d => d.data() as WalletRecharge)).sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
+      } catch {
+        return [];
+      }
+    }
+  },
+
+  addWalletRecharge: async (recharge: WalletRecharge): Promise<boolean> => {
+    try {
+      await setDoc(doc(dbFirestore, 'wallet_recharges', recharge.id), recharge);
+      return true;
+    } catch {
+      return false;
+    }
+  },
+
+  updateWalletRecharge: async (rechargeId: string, updates: Partial<WalletRecharge>): Promise<boolean> => {
+    try {
+      await updateDoc(doc(dbFirestore, 'wallet_recharges', rechargeId), updates);
+      return true;
+    } catch {
       return false;
     }
   },
