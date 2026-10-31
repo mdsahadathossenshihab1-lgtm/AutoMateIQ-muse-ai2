@@ -30,7 +30,7 @@
         "amount": { "type": "number" },
         "paymentMethod": { "type": "string" },
         "transactionId": { "type": "string" },
-        "status": { "type": "string", "enum": ["pending", "approved", "rejected", "completed"] },
+        "status": { "type": "string", "enum": ["pending", "in_progress", "approved", "rejected", "completed", "cancelled"] },
         "date": { "type": "string" }
       },
       "required": ["userId", "packageId", "amount", "status"]
@@ -48,6 +48,40 @@
         "created_at": { "type": "string" }
       },
       "required": ["user_id", "sender_role", "message"]
+    },
+    "messenger_leads": {
+      "title": "Messenger Lead",
+      "description": "Business customer Messenger leads",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "ownerId": { "type": "string" },
+        "sourcePage": { "type": "string" },
+        "sourcePageId": { "type": "string" },
+        "name": { "type": "string" },
+        "psid": { "type": "string" },
+        "status": { "type": "string", "enum": ["new", "bot_replied", "handover", "owner_replied", "closed"] },
+        "lastMessage": { "type": "string" },
+        "updated_at": { "type": "string" }
+      },
+      "required": ["ownerId", "name", "status"]
+    },
+    "wallet_recharges": {
+      "title": "Wallet Recharge",
+      "description": "API Credit Wallet recharge requests",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "userId": { "type": "string" },
+        "userName": { "type": "string" },
+        "amount": { "type": "number" },
+        "paymentMethod": { "type": "string", "enum": ["bkash", "nagad"] },
+        "senderPhone": { "type": "string" },
+        "trxId": { "type": "string" },
+        "status": { "type": "string", "enum": ["pending", "approved", "rejected"] },
+        "date": { "type": "string" }
+      },
+      "required": ["userId", "amount", "paymentMethod", "senderPhone", "trxId", "status"]
     },
     "system_settings": {
       "title": "System Settings",
@@ -71,6 +105,14 @@
     "/support_messages/{messageId}": {
       "schema": "support_messages",
       "description": "Real-time support and chat messages"
+    },
+    "/messenger_leads/{leadId}": {
+      "schema": "messenger_leads",
+      "description": "Client Messenger leads and threads"
+    },
+    "/wallet_recharges/{rechargeId}": {
+      "schema": "wallet_recharges",
+      "description": "Client wallet recharges pending admin approval"
     },
     "/system_settings/{settingId}": {
       "schema": "system_settings",

@@ -1,12 +1,12 @@
 {
-  "projectId": "bionic-client-473216-d9",
-  "appId": "1:551072361939:web:1e462fc68db47db95d1326",
-  "apiKey": "AIzaSyDWW84MyHbuiL71UVTVUvNW6K4qNyN2RQk",
-  "authDomain": "bionic-client-473216-d9.firebaseapp.com",
+  "projectId": "project-d28c75fa-a3af-48dc-ac6",
+  "appId": "1:875494692128:web:1947d5834f049bfe85b345",
+  "apiKey": "AIzaSyCBMJSy_j8LbOsc3eOwVZ31zUzHBKwkZoY",
+  "authDomain": "project-d28c75fa-a3af-48dc-ac6.firebaseapp.com",
   "firestoreDatabaseId": "ai-studio-automateiq-a1b8237c-c72f-49f9-8d26-7de394824bb1",
-  "storageBucket": "bionic-client-473216-d9.firebasestorage.app",
-  "messagingSenderId": "551072361939",
+  "storageBucket": "project-d28c75fa-a3af-48dc-ac6.firebasestorage.app",
+  "messagingSenderId": "875494692128",
   "measurementId": "",
-  "oAuthClientId": "551072361939-sljh2dp02asks0srgjj8iel8266v2ijk.apps.googleusercontent.com",
+  "oAuthClientId": "875494692128-ksqhe6jd8bd893am3s90usjtm43v6ceh.apps.googleusercontent.com",
   "recaptchaSiteKey": ""
 }

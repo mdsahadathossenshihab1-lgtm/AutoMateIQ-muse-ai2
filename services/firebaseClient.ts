@@ -116,7 +116,11 @@ export const db = {
       return { success: true, data: userDoc };
     } catch (error: any) {
       console.error('Google Sign-In Error:', error);
-      return { success: false, message: error.message || 'Google sign-in failed' };
+      let msg = error.message;
+      if (error.code === 'auth/unauthorized-domain') {
+        msg = 'বর্তমান ডোমেইনটি Firebase Authorized Domains-এ যুক্ত নেই। আপনি নিচের ইমেইল ও পাসওয়ার্ড দিয়ে সরাসরি লগইন করতে পারবেন।';
+      }
+      return { success: false, message: msg || 'Google sign-in failed' };
     }
   },
 
