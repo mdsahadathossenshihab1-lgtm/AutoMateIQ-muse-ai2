@@ -46,7 +46,7 @@ const ChatInterface = ({ messages, currentUserId, onSend, targetUser }: { messag
   const handleSend = (e: React.FormEvent) => { e.preventDefault(); if (!input.trim()) return; onSend(input); setInput(''); };
 
   return (
-    <div className="flex flex-col h-[700px] bg-white rounded-2xl border border-slate-200 shadow-xl overflow-hidden">
+    <div className="flex flex-col h-[70dvh] min-h-[480px] max-h-[700px] bg-white rounded-2xl border border-slate-200 shadow-xl overflow-hidden">
       <div className="bg-slate-50 border-b border-slate-200 p-5 flex items-center gap-4 sticky top-0 z-10">
         <div className="w-12 h-12 bg-blue-100 rounded-full flex items-center justify-center text-blue-600 font-bold text-lg border border-blue-200">
           {targetUser ? (targetUser.name || 'U').charAt(0).toUpperCase() : 'S'}
@@ -119,8 +119,8 @@ const ApproveModal = ({ order, isOpen, onClose, onApprove }: { order: Order | nu
   };
 
   return (
-    <div className="fixed inset-0 z-[70] flex items-center justify-center p-4 bg-black/60 backdrop-blur-sm">
-      <div className="bg-white border border-slate-200 rounded-3xl shadow-2xl w-full max-w-md overflow-hidden animate-fade-in-up">
+    <div onClick={onClose} className="fixed inset-0 z-[70] flex items-start justify-center p-4 bg-black/60 backdrop-blur-sm overflow-y-auto">
+      <div onClick={(e) => e.stopPropagation()} className="bg-white border border-slate-200 rounded-3xl shadow-2xl w-full max-w-md overflow-hidden animate-fade-in-up my-4 sm:my-8">
         <div className="bg-slate-50 p-6 flex justify-between items-center text-slate-900 border-b border-slate-200">
           <h3 className="font-bold text-xl">{isTopUp ? 'টপ-আপ কনফার্মেশন' : 'অর্ডার গ্রহণ করুন'}</h3>
           <button onClick={onClose} className="p-2 hover:bg-slate-200 rounded-full transition-colors"><X size={20} /></button>
@@ -162,8 +162,8 @@ const ReviewModal = ({ order, isOpen, onClose, onAction }: { order: Order | null
   };
 
   return (
-    <div className="fixed inset-0 z-[70] flex items-center justify-center p-4 bg-black/60 backdrop-blur-sm">
-      <div className="bg-white border border-slate-200 rounded-3xl shadow-2xl w-full max-w-lg overflow-hidden animate-fade-in-up">
+    <div onClick={onClose} className="fixed inset-0 z-[70] flex items-start justify-center p-4 bg-black/60 backdrop-blur-sm overflow-y-auto">
+      <div onClick={(e) => e.stopPropagation()} className="bg-white border border-slate-200 rounded-3xl shadow-2xl w-full max-w-lg overflow-hidden animate-fade-in-up my-4 sm:my-8">
         <div className="bg-slate-50 p-6 flex justify-between items-center text-slate-900 border-b border-slate-200">
           <h3 className="font-bold text-xl">রিভিউ প্যানেল</h3>
           <button onClick={onClose} className="p-2 hover:bg-slate-200 rounded-full transition-colors"><X size={20} /></button>
@@ -709,7 +709,8 @@ const Dashboard: React.FC<DashboardProps> = ({ onClose, onNavigateToPricing }) =
                         <input type="text" placeholder={t('dashboard.search_placeholder')} value={searchTerm} onChange={(e) => setSearchTerm(e.target.value)} className="w-full pl-12 pr-4 py-3 bg-slate-50 border border-slate-200 rounded-xl focus:ring-2 focus:ring-blue-500 text-slate-900 font-medium placeholder-slate-400" />
                       </div>
                     </div>
-                    <table className="w-full text-left">
+                    <div className="overflow-x-auto">
+                    <table className="w-full text-left min-w-[720px]">
                       <thead className="bg-slate-50 text-slate-500 text-xs uppercase tracking-wider font-semibold">
                         <tr>
                           <th className="px-8 py-5">{t('dashboard.user')}</th>
@@ -750,6 +751,7 @@ const Dashboard: React.FC<DashboardProps> = ({ onClose, onNavigateToPricing }) =
                         })}
                       </tbody>
                     </table>
+                    </div>
                   </div>
                 ) : (
                   <div>

@@ -146,7 +146,7 @@ const OrderModal: React.FC<OrderModalProps> = ({ isOpen, onClose, pkgId, customA
 
   if (showSuccessView) {
     return (
-      <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/70 backdrop-blur-sm transition-opacity duration-300">
+      <div className="fixed inset-0 z-50 flex items-start justify-center p-4 bg-black/70 backdrop-blur-sm transition-opacity duration-300 overflow-y-auto">
         <div className="bg-white rounded-2xl shadow-2xl w-full max-w-md overflow-hidden animate-fade-in-up text-center p-8">
           <div className="w-20 h-20 bg-blue-100 text-blue-600 rounded-full flex items-center justify-center mx-auto mb-6">
             <CheckCircle2 size={40} />
@@ -180,8 +180,8 @@ const OrderModal: React.FC<OrderModalProps> = ({ isOpen, onClose, pkgId, customA
   }
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/70 backdrop-blur-sm transition-opacity duration-300">
-      <div className="bg-white rounded-2xl shadow-2xl w-full max-w-lg max-h-[90vh] overflow-hidden flex flex-col animate-fade-in-up">
+    <div className="fixed inset-0 z-50 flex items-start justify-center p-4 bg-black/70 backdrop-blur-sm transition-opacity duration-300 overflow-y-auto">
+      <div className="bg-white rounded-2xl shadow-2xl w-full max-w-lg max-h-[calc(100dvh-2rem)] overflow-hidden flex flex-col my-4 sm:my-8 animate-fade-in-up">
         {/* Header */}
         <div className="bg-blue-600 p-5 flex justify-between items-center text-white shrink-0">
           <div>

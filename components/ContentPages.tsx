@@ -30,13 +30,13 @@ const Section: React.FC<{ title: string; children: React.ReactNode }> = ({ title
 );
 
 const ContentPages: React.FC<{ page: ContentPageId; onClose: () => void }> = ({ page, onClose }) => (
-  <div className="fixed inset-0 z-[80] flex items-center justify-center p-4 bg-black/60 backdrop-blur-sm overflow-y-auto">
-    <div className="bg-white border border-slate-200 rounded-3xl shadow-2xl w-full max-w-2xl overflow-hidden my-8">
-      <div className="bg-slate-50 p-6 flex justify-between items-center border-b border-slate-200">
+  <div onClick={onClose} className="fixed inset-0 z-[80] flex items-start justify-center p-4 bg-black/60 backdrop-blur-sm overflow-y-auto">
+    <div onClick={(e) => e.stopPropagation()} className="bg-white border border-slate-200 rounded-3xl shadow-2xl w-full max-w-2xl overflow-hidden my-4 sm:my-8 flex flex-col max-h-[calc(100dvh-2rem)] sm:max-h-[calc(100dvh-4rem)]">
+      <div className="bg-slate-50 p-6 flex justify-between items-center border-b border-slate-200 shrink-0">
         <h2 className="font-bold text-xl text-slate-900">{CONTENT_PAGE_TITLES[page]}</h2>
-        <button onClick={onClose} className="p-2 hover:bg-slate-200 rounded-full"><X size={20} /></button>
+        <button onClick={onClose} className="p-2 hover:bg-slate-200 rounded-full shrink-0"><X size={20} /></button>
       </div>
-      <div className="p-6 md:p-8 max-h-[75vh] overflow-y-auto">
+      <div className="p-6 md:p-8 overflow-y-auto min-h-0">
         {page === 'faq' && (
           <>
             <Section title="What does AutoMateIQ do?">
