@@ -29,10 +29,10 @@ const MessengerLeads: React.FC = () => {
   const ownerId = user?.id || '';
   const { leads: liveLeads, source: liveSource } = useLiveMessengerLeads(ownerId);
   const [leads, setLeads] = useState<MessengerLead[]>(() => loadMessengerLeads(ownerId));
-  // Live Firestore leads are shown as a banner with a switch button,
-  // not auto-replaced: the reply/notes flow below works on local state,
-  // and Firestore status updates are written separately above.
-  const shownLeads = leads;
+  // Real leads only: when Firestore has live leads, show those by
+  // default (not demo seeds, not a hidden banner button). Local state
+  // is only for replies/notes on leads already shown.
+  const shownLeads = liveSource !== 'local' ? liveLeads : leads;
   const [search, setSearch] = useState('');
   const [filter, setFilter] = useState<Filter>('all');
   const [selectedId, setSelectedId] = useState<string | null>(null);
@@ -102,17 +102,14 @@ const MessengerLeads: React.FC = () => {
       <div className="bg-amber-50 border border-amber-200 rounded-2xl p-4 flex items-start gap-3">
         <AlertTriangle size={20} className="text-amber-600 shrink-0 mt-0.5" />
         <p className="text-sm text-amber-800 leading-relaxed">
-          <b>Messenger Leads — আপনার নিজের কাস্টমার।</b> এখানে শুধু আপনার পেইজে মেসেজ করা কাস্টমাররা দেখা যায় — অন্য কোনো ব্যবসার কাস্টমার এখানে আসে না।
+          <b>Messenger Leads — আপনার নিজের কাস্টমার।</b> এখানে শুধু আপনার পেইজে আসলেই মেসেজ করা কাস্টমাররা দেখা যায় — অন্য কোনো ব্যবসার কাস্টমার এখানে আসে না, আর কোনো ডেমো চ্যাট দেখানো হয় না।
           এটি সাপোর্ট Inbox (কাস্টমার ↔ ডেভলপার টিম) থেকে আলাদা।
           {isReplyWebhookConfigured()
             ? ' রিপ্লাই webhook কনফিগার করা আছে, তাই রিপ্লাই Messenger-এ পাঠানো হবে।'
             : ' রিপ্লাই webhook এখনো কনফিগার করা হয়নি, তাই রিপ্লাই শুধু এখানে সেভ হবে এবং "Pending send" দেখাবে — Messenger-এ পৌঁছেছে বলে দেখানো হবে না।'}
-          <br /><span className="text-amber-600">নিচের লিডগুলো ডেমো ডাটা (লোকাল) — তবে Firestore-ready লেয়ার তৈরি: services/messengerLeadsFirestore.ts-এ messenger_leads কালেকশন ডিজাইন + রিয়েলটাইম হ্যান্ডওভার ব্যাজ হুক আছে (ড্যাশবোর্ড ব্যাজ এখন লাইভ-সচেতন)। বট Firestore-এ হ্যান্ডওভার লিখতে শুরু করলে ব্যাজ লাইভ ডাটা থেকে জ্বলবে; পুরো লিস্ট Firestore-এ যাওয়া এখনো বাকি — দেখুন MESSENGER_REPLY_SPEC.md।</span>
-          {liveSource !== 'local' && liveLeads.length > 0 && (
-            <span className="block mt-2 text-green-700 font-bold">
-              Live Firestore leads পাওয়া গেছে ({liveLeads.length}টি) — <button onClick={() => update(liveLeads)} className="underline">এখানে লাইভ লিড দেখাও</button>
-            </span>
-          )}
+          {liveSource !== 'local'
+            ? ` লাইভ Firestore থেকে ${liveLeads.length}টি আসল লিড দেখানো হচ্ছে।`
+            : ' এখনো কোনো আসল লিড আসেনি — Page-এ কেউ মেসেজ করলেই এখানে দেখা যাবে।'}
         </p>
       </div>
 
@@ -134,7 +131,7 @@ const MessengerLeads: React.FC = () => {
 
       {!selected ? (
         <div className="grid grid-cols-1 gap-4">
-          {filtered.length === 0 && <div className="p-12 text-center text-slate-400 bg-white rounded-3xl border border-slate-200"><MessageCircle size={48} className="mx-auto mb-4 opacity-30" /><p>কোনো লিড পাওয়া যায়নি।</p></div>}
+          {filtered.length === 0 && <div className="p-12 text-center text-slate-400 bg-white rounded-3xl border border-slate-200"><MessageCircle size={48} className="mx-auto mb-4 opacity-30" /><p>কোনো আসল লিড পাওয়া যায়নি। Page-এ কেউ মেসেজ করলেই এখানে দেখা যাবে।</p></div>}
           {filtered.map((lead) => (
             <button key={lead.id} onClick={() => { setSelectedId(lead.id); setNote(lead.note || ''); setShowFullPsid(false); }} className="bg-white p-6 rounded-2xl border border-slate-100 shadow-sm hover:shadow-md hover:border-blue-300 transition-all text-left flex flex-col md:flex-row md:items-center gap-4">
               <div className="w-12 h-12 bg-blue-50 rounded-xl flex items-center justify-center text-blue-600 font-bold border border-blue-100 shrink-0">{(lead.name || '?').charAt(0)}</div>

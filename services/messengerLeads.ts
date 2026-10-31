@@ -32,72 +32,28 @@ export function maskPsid(psid: string): string {
 
 const storageKey = (ownerId: string) => `automateiq_messenger_leads_${ownerId}`;
 
-/** Demo seed data. Clearly labelled DEMO in the UI; never real customers.
- *  Seeded per ownerId, so one business can never see another's leads. */
-function seedLeads(ownerId: string): MessengerLead[] {
-  const now = Date.now();
-  const iso = (minsAgo: number) => new Date(now - minsAgo * 60000).toISOString();
-  return [
-    {
-      id: `demo-${ownerId}-1`,
-      ownerId,
-      sourcePage: 'Your Facebook Page',
-      name: 'Rahim Uddin (demo)',
-      psid: '1234567890123456',
-      status: 'handover',
-      lastMessage: 'আমি মানুষের সাথে কথা বলতে চাই',
-      updated_at: iso(12),
-      messages: [
-        { id: 'm1', sender: 'customer', text: 'Messenger Chatbot Premium এর দাম কত?', created_at: iso(40) },
-        { id: 'm2', sender: 'bot', text: 'Premium মাসিক ৳১,০০০, One-Time ৳৫,০০০। 24/7 অটো রিপ্লাই, ড্যাশবোর্ড, Premium-এ ভয়েস সাপোর্ট আছে।', created_at: iso(38) },
-        { id: 'm3', sender: 'customer', text: 'আমি মানুষের সাথে কথা বলতে চাই', created_at: iso(12) },
-      ],
-    },
-    {
-      id: `demo-${ownerId}-2`,
-      ownerId,
-      sourcePage: 'Your Facebook Page',
-      name: 'Nasrin Akter (demo)',
-      psid: '9876543210987654',
-      status: 'bot_replied',
-      lastMessage: 'Standard প্যাকেজে কি কি আছে?',
-      updated_at: iso(90),
-      messages: [
-        { id: 'm1', sender: 'customer', text: 'Standard প্যাকেজে কি কি আছে?', created_at: iso(95) },
-        { id: 'm2', sender: 'bot', text: 'Standard-এ 24/7 অটো রিপ্লাই, ড্যাশবোর্ড ও API ইন্টিগ্রেশন আছে। বিস্তারিত জানতে বলুন।', created_at: iso(90) },
-      ],
-    },
-    {
-      id: `demo-${ownerId}-3`,
-      ownerId,
-      sourcePage: 'Your Facebook Page',
-      name: 'Karim Mia (demo)',
-      psid: '5555000011112222',
-      status: 'new',
-      lastMessage: 'হ্যালো, আপনাদের সার্ভিস সম্পর্কে জানতে চাই',
-      updated_at: iso(5),
-      messages: [
-        { id: 'm1', sender: 'customer', text: 'হ্যালো, আপনাদের সার্ভিস সম্পর্কে জানতে চাই', created_at: iso(5) },
-      ],
-    },
-  ];
-}
-
-/** Load ONLY this owner's leads. The ownerId filter is the isolation
- *  boundary: callers must pass the logged-in user's id, never 'all'. */
+/** Load ONLY this owner's leads. No demo seeds are created anymore:
+ *  earlier versions seeded 3 demo leads (Karim/Rahim/Nasrin) per owner
+ *  into localStorage, which is why the Messenger Leads page showed
+ *  chats that never messaged the Page. Any stored demo leads
+ *  (id starting with "demo-") are dropped on load, so a user who
+ *  already has the old seeds sees an empty, real-only list. */
 export function loadMessengerLeads(ownerId: string): MessengerLead[] {
   if (!ownerId) return [];
   try {
     const raw = localStorage.getItem(storageKey(ownerId));
     if (raw) {
       const parsed = JSON.parse(raw) as MessengerLead[];
-      // Defence in depth: drop any record that does not belong here.
-      return parsed.filter((l) => l.ownerId === ownerId);
+      // Defence in depth: drop any record that does not belong here,
+      // and drop all old demo seeds — they are not real customers.
+      const real = parsed.filter((l) => l.ownerId === ownerId && !l.id.startsWith('demo-'));
+      if (real.length !== parsed.length) {
+        try { localStorage.setItem(storageKey(ownerId), JSON.stringify(real)); } catch { /* ignore */ }
+      }
+      return real;
     }
-  } catch { /* fall through to seed */ }
-  const seeded = seedLeads(ownerId);
-  try { localStorage.setItem(storageKey(ownerId), JSON.stringify(seeded)); } catch { /* private mode */ }
-  return seeded;
+  } catch { /* fall through to empty */ }
+  return [];
 }
 
 export function saveMessengerLeads(ownerId: string, leads: MessengerLead[]): void {
