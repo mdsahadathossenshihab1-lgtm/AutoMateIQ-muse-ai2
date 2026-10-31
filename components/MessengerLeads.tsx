@@ -5,7 +5,8 @@ import {
   loadMessengerLeads, saveMessengerLeads, sendMessengerReply,
   isReplyWebhookConfigured, maskPsid, LEAD_STATUS_LABEL,
 } from '../services/messengerLeads';
-import { Search, Send, ArrowLeft, MessageCircle, BellRing, CheckCircle, XCircle, StickyNote, Eye, EyeOff, AlertTriangle } from 'lucide-react';
+import { useLiveMessengerLeads, updateFirestoreLead } from '../services/messengerLeadsFirestore';
+import { Search, Send, ArrowLeft, MessageCircle, BellRing, CheckCircle, XCircle, StickyNote, Eye, EyeOff, AlertTriangle, Hand, Bot } from 'lucide-react';
 
 type Filter = 'all' | 'handover' | MessengerLeadStatus;
 
@@ -26,7 +27,12 @@ const STATUS_STYLE: Record<MessengerLeadStatus, string> = {
 const MessengerLeads: React.FC = () => {
   const { user } = useAuth();
   const ownerId = user?.id || '';
+  const { leads: liveLeads, source: liveSource } = useLiveMessengerLeads(ownerId);
   const [leads, setLeads] = useState<MessengerLead[]>(() => loadMessengerLeads(ownerId));
+  // Live Firestore leads are shown as a banner with a switch button,
+  // not auto-replaced: the reply/notes flow below works on local state,
+  // and Firestore status updates are written separately above.
+  const shownLeads = leads;
   const [search, setSearch] = useState('');
   const [filter, setFilter] = useState<Filter>('all');
   const [selectedId, setSelectedId] = useState<string | null>(null);
@@ -36,16 +42,32 @@ const MessengerLeads: React.FC = () => {
   const [sending, setSending] = useState(false);
 
   const update = (next: MessengerLead[]) => { setLeads(next); saveMessengerLeads(ownerId, next); };
-  const handoverCount = leads.filter((l) => l.status === 'handover').length;
+  const handoverCount = shownLeads.filter((l) => l.status === 'handover').length;
 
-  const filtered = useMemo(() => leads.filter((l) => {
+  const filtered = useMemo(() => shownLeads.filter((l) => {
     const term = search.toLowerCase();
     const matchesSearch = !term || l.name.toLowerCase().includes(term) || l.lastMessage.toLowerCase().includes(term) || l.sourcePage.toLowerCase().includes(term);
     const matchesFilter = filter === 'all' ? true : filter === 'handover' ? l.status === 'handover' : l.status === filter;
     return matchesSearch && matchesFilter;
-  }).sort((a, b) => new Date(b.updated_at).getTime() - new Date(a.updated_at).getTime()), [leads, search, filter]);
+  }).sort((a, b) => new Date(b.updated_at).getTime() - new Date(a.updated_at).getTime()), [shownLeads, search, filter]);
 
-  const selected = leads.find((l) => l.id === selectedId) || null;
+  const selected = shownLeads.find((l) => l.id === selectedId) || null;
+
+  const handleTakeOver = async () => {
+    if (!selected) return;
+    // Human takes over: bot must pause for this PSID. The Firestore
+    // paused flag is written here; the bot-side pause check is still
+    // to be wired, so until then the bot may still reply too — the
+    // warning below says this plainly, it is not hidden.
+    await updateFirestoreLead(selected.id, { status: 'handover', paused: true });
+    update(leads.map((l) => l.id === selected.id ? { ...l, status: 'handover' as MessengerLeadStatus, updated_at: new Date().toISOString() } : l));
+  };
+
+  const handleResumeAI = async () => {
+    if (!selected) return;
+    await updateFirestoreLead(selected.id, { status: 'bot_replied', paused: false });
+    update(leads.map((l) => l.id === selected.id ? { ...l, status: 'bot_replied' as MessengerLeadStatus, updated_at: new Date().toISOString() } : l));
+  };
 
   const handleSendReply = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -86,7 +108,16 @@ const MessengerLeads: React.FC = () => {
             ? ' রিপ্লাই webhook কনফিগার করা আছে, তাই রিপ্লাই Messenger-এ পাঠানো হবে।'
             : ' রিপ্লাই webhook এখনো কনফিগার করা হয়নি, তাই রিপ্লাই শুধু এখানে সেভ হবে এবং "Pending send" দেখাবে — Messenger-এ পৌঁছেছে বলে দেখানো হবে না।'}
           <br /><span className="text-amber-600">নিচের লিডগুলো ডেমো ডাটা (লোকাল) — তবে Firestore-ready লেয়ার তৈরি: services/messengerLeadsFirestore.ts-এ messenger_leads কালেকশন ডিজাইন + রিয়েলটাইম হ্যান্ডওভার ব্যাজ হুক আছে (ড্যাশবোর্ড ব্যাজ এখন লাইভ-সচেতন)। বট Firestore-এ হ্যান্ডওভার লিখতে শুরু করলে ব্যাজ লাইভ ডাটা থেকে জ্বলবে; পুরো লিস্ট Firestore-এ যাওয়া এখনো বাকি — দেখুন MESSENGER_REPLY_SPEC.md।</span>
+          {liveSource !== 'local' && liveLeads.length > 0 && (
+            <span className="block mt-2 text-green-700 font-bold">
+              Live Firestore leads পাওয়া গেছে ({liveLeads.length}টি) — <button onClick={() => update(liveLeads)} className="underline">এখানে লাইভ লিড দেখাও</button>
+            </span>
+          )}
         </p>
+      </div>
+
+      <div className="bg-orange-50 border border-orange-200 rounded-2xl p-4 text-sm text-orange-800 leading-relaxed">
+        <b>সতর্কতা — Handover / Take Over এখনো পুরো লাইভ না:</b> এই পেজে Take Over / Resume AI বোতাম দিয়ে লিডের স্ট্যাটাস + paused ফ্ল্যাগ Firestore-এ লেখা হয়, কিন্তু বট এখনো সেই paused ফ্ল্যাগ চেক করে না — তাই বটের pause-check চালু না হওয়া পর্যন্ত বটও রিপ্লাই দিতে পারে, ডাবল রিপ্লাই হতে পারে। তাই এখনই কাস্টমারকে এখান থেকে রিপ্লাই দেওয়ার আগে বটের pause-check লাইভ হতে হবে। Reply webhook চালু হলে রিপ্লাই Messenger-এ যাবে, না হলে শুধু এখানে সেভ হবে (Pending send)।
       </div>
 
       <div className="flex flex-wrap items-center gap-2">
@@ -131,6 +162,8 @@ const MessengerLeads: React.FC = () => {
             </div>
             {selected.status === 'handover' && <button onClick={handleResolve} className="flex items-center gap-2 bg-green-600 text-white font-bold px-5 py-3 rounded-xl hover:bg-green-500"><CheckCircle size={18} /> Mark handover resolved</button>}
             {selected.status !== 'closed' && selected.status !== 'handover' && <button onClick={handleResolve} className="flex items-center gap-2 bg-slate-600 text-white font-bold px-5 py-3 rounded-xl hover:bg-slate-500"><XCircle size={18} /> Close lead</button>}
+            {selected.status !== 'handover' && <button onClick={handleTakeOver} className="flex items-center gap-2 bg-orange-600 text-white font-bold px-5 py-3 rounded-xl hover:bg-orange-500"><Hand size={18} /> Take Over (Human)</button>}
+            {selected.status === 'handover' && <button onClick={handleResumeAI} className="flex items-center gap-2 bg-indigo-600 text-white font-bold px-5 py-3 rounded-xl hover:bg-indigo-500"><Bot size={18} /> Resume AI</button>}
           </div>
 
           <div className="p-6 space-y-4 max-h-[480px] overflow-y-auto bg-slate-50">

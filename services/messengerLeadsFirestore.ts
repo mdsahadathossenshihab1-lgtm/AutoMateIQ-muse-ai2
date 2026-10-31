@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import {
-  collection, query, where, orderBy, getDocs, onSnapshot,
+  collection, query, where, orderBy, getDocs, onSnapshot, doc, updateDoc,
 } from 'firebase/firestore';
 import { dbFirestore } from './firebaseClient';
 import { MessengerLead } from '../types';
@@ -51,6 +51,22 @@ import { loadMessengerLeads } from './messengerLeads';
  */
 
 export type LeadsSource = 'firestore-live' | 'firestore-poll' | 'local';
+
+/** Update a lead's status/paused flag in Firestore (website admin side).
+ *  This is what Take Over / Resume AI use. It does NOT by itself stop
+ *  the bot — the bot must also check this paused flag before AI replies
+ *  (bot wiring, still to be built). Until then the UI must say so. */
+export async function updateFirestoreLead(leadId: string, updates: { status?: string; paused?: boolean; note?: string }): Promise<boolean> {
+  try {
+    await updateDoc(doc(dbFirestore, 'messenger_leads', leadId), {
+      ...updates,
+      updated_at: new Date().toISOString(),
+    });
+    return true;
+  } catch {
+    return false;
+  }
+}
 
 function mapDoc(d: any): MessengerLead {
   const data = d.data();

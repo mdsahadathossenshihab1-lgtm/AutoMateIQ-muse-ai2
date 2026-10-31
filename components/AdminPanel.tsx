@@ -6,6 +6,8 @@ import {
 } from '../services/wallet';
 import { db } from '../services/firebaseClient';
 import OrderDetail, { ORDER_STATUS_LABEL, ORDER_STATUS_STYLE } from './OrderDetail';
+import MessengerLeads from './MessengerLeads';
+import { useLiveHandoverCount } from '../services/messengerLeadsFirestore';
 import { Users, MessageCircle, Package, Coins, Search, ArrowLeft, CheckCircle, XCircle, Clock } from 'lucide-react';
 
 /**
@@ -35,7 +37,8 @@ const AdminPanel: React.FC<{
   onOpenSupportThread: (customer: User) => void;
 }> = ({ onOpenSupportThread }) => {
   const { user, users, orders, messages, updateOrderStatus, updateOrderDetails, sendSupportMessage } = useAuth();
-  const [tab, setTab] = useState<'customers' | 'conversations' | 'pending' | 'wallet'>('pending');
+  const [tab, setTab] = useState<'customers' | 'conversations' | 'pending' | 'wallet' | 'messenger'>('pending');
+  const handoverCount = useLiveHandoverCount(user?.id || '');
   const [search, setSearch] = useState('');
   const [selectedCustomer, setSelectedCustomer] = useState<User | null>(null);
   const [selectedOrder, setSelectedOrder] = useState<Order | null>(null);
@@ -99,6 +102,7 @@ const AdminPanel: React.FC<{
         {tabBtn('customers', 'Customers')}
         {tabBtn('conversations', 'Admin conversations')}
         {tabBtn('wallet', 'Wallet verification', pendingWallet.length)}
+        {tabBtn('messenger', 'Messenger (Page inbox)', handoverCount)}
       </div>
 
       <div className="relative">
@@ -228,6 +232,16 @@ const AdminPanel: React.FC<{
             </div>
           ))}
           <p className="text-xs text-slate-400">Approving adds the amount to the customer's wallet balance (approved total). Rejecting does not. No payment is auto-verified.</p>
+        </div>
+      )}
+
+      {tab === 'messenger' && (
+        <div>
+          <p className="text-sm text-slate-500 mb-4">
+            Page-এ মেসেজ করা কাস্টমাররা এখানে দেখা যাবে — এটি সাপোর্ট Inbox (কাস্টমার ↔ ডেভলপার টিম) থেকে আলাদা।
+            Handover ব্যাজ = Handover স্ট্যাটাসের লিড সংখ্যা।
+          </p>
+          <MessengerLeads />
         </div>
       )}
 
