@@ -5,7 +5,7 @@ import {
   loadMessengerLeads, saveMessengerLeads, sendMessengerReply,
   isReplyWebhookConfigured, maskPsid, LEAD_STATUS_LABEL,
 } from '../services/messengerLeads';
-import { useLiveMessengerLeads, updateFirestoreLead } from '../services/messengerLeadsFirestore';
+import { useLiveMessengerLeads, updateFirestoreLead, appendFirestoreMessage } from '../services/messengerLeadsFirestore';
 import { Search, Send, ArrowLeft, MessageCircle, BellRing, CheckCircle, XCircle, StickyNote, Eye, EyeOff, AlertTriangle, Hand, Bot } from 'lucide-react';
 
 type Filter = 'all' | 'handover' | MessengerLeadStatus;
@@ -29,10 +29,21 @@ const MessengerLeads: React.FC = () => {
   const ownerId = user?.id || '';
   const { leads: liveLeads, source: liveSource } = useLiveMessengerLeads(ownerId);
   const [leads, setLeads] = useState<MessengerLead[]>(() => loadMessengerLeads(ownerId));
+  const [sentMessages, setSentMessages] = useState<Record<string, MessengerLead['messages']>>({});
   // Real leads only: when Firestore has live leads, show those by
-  // default (not demo seeds, not a hidden banner button). Local state
-  // is only for replies/notes on leads already shown.
-  const shownLeads = liveSource !== 'local' ? liveLeads : leads;
+  // default (not demo seeds, not a hidden banner button). Owner replies
+  // sent from here are merged in immediately (and also written to
+  // Firestore) — previously a reply only updated local state while the
+  // thread rendered live Firestore data, so the reply never appeared
+  // in the thread even though the webhook delivered it to Messenger.
+  const baseLeads = liveSource !== 'local' ? liveLeads : leads;
+  const shownLeads = baseLeads.map((l) => {
+    const extra = sentMessages[l.id];
+    if (!extra || extra.length === 0) return l;
+    const existingIds = new Set(l.messages.map((m) => m.id));
+    const merged = [...l.messages, ...extra.filter((m) => !existingIds.has(m.id))];
+    return { ...l, messages: merged, lastMessage: merged[merged.length - 1]?.text || l.lastMessage };
+  });
   const [search, setSearch] = useState('');
   const [filter, setFilter] = useState<Filter>('all');
   const [selectedId, setSelectedId] = useState<string | null>(null);
@@ -75,12 +86,18 @@ const MessengerLeads: React.FC = () => {
     setSending(true);
     const delivery = await sendMessengerReply(selected, reply.trim());
     const now = new Date().toISOString();
+    const ownerMsg = { id: Date.now().toString(), sender: 'owner' as const, text: reply.trim(), created_at: now, delivery };
+    // Show immediately AND write to Firestore, so the reply stays in
+    // the live thread (and the bot's history) instead of disappearing
+    // when the next live snapshot arrives.
+    setSentMessages((prev) => ({ ...prev, [selected.id]: [...(prev[selected.id] || []), ownerMsg] }));
+    await appendFirestoreMessage(selected.id, ownerMsg);
     const next = leads.map((l) => l.id === selected.id ? {
       ...l,
       status: 'owner_replied' as MessengerLeadStatus,
       lastMessage: reply.trim(),
       updated_at: now,
-      messages: [...l.messages, { id: Date.now().toString(), sender: 'owner' as const, text: reply.trim(), created_at: now, delivery }],
+      messages: [...l.messages, ownerMsg],
     } : l);
     update(next); setReply(''); setSending(false);
   };
@@ -134,7 +151,9 @@ const MessengerLeads: React.FC = () => {
           {filtered.length === 0 && <div className="p-12 text-center text-slate-400 bg-white rounded-3xl border border-slate-200"><MessageCircle size={48} className="mx-auto mb-4 opacity-30" /><p>কোনো আসল লিড পাওয়া যায়নি। Page-এ কেউ মেসেজ করলেই এখানে দেখা যাবে।</p></div>}
           {filtered.map((lead) => (
             <button key={lead.id} onClick={() => { setSelectedId(lead.id); setNote(lead.note || ''); setShowFullPsid(false); }} className="bg-white p-6 rounded-2xl border border-slate-100 shadow-sm hover:shadow-md hover:border-blue-300 transition-all text-left flex flex-col md:flex-row md:items-center gap-4">
-              <div className="w-12 h-12 bg-blue-50 rounded-xl flex items-center justify-center text-blue-600 font-bold border border-blue-100 shrink-0">{(lead.name || '?').charAt(0)}</div>
+              {lead.profilePic
+                ? <img src={lead.profilePic} alt={lead.name} className="w-12 h-12 rounded-xl object-cover border border-blue-100 shrink-0" />
+                : <div className="w-12 h-12 bg-blue-50 rounded-xl flex items-center justify-center text-blue-600 font-bold border border-blue-100 shrink-0">{(lead.name || '?').charAt(0)}</div>}
               <div className="flex-1 min-w-0">
                 <div className="flex flex-wrap items-center gap-2"><h4 className="font-bold text-slate-900">{lead.name}</h4><span className={`px-2 py-0.5 rounded-full text-[11px] font-bold border ${STATUS_STYLE[lead.status]}`}>{LEAD_STATUS_LABEL[lead.status]}</span>{lead.status === 'handover' && <span className="flex items-center gap-1 text-orange-600 text-xs font-bold"><BellRing size={13} /> Handover</span>}</div>
                 <p className="text-sm text-slate-500 truncate mt-1">{lead.lastMessage}</p>
@@ -147,7 +166,11 @@ const MessengerLeads: React.FC = () => {
       ) : (
         <div className="bg-white rounded-3xl border border-slate-200 shadow-sm overflow-hidden">
           <div className="p-6 border-b border-slate-200 flex flex-wrap items-center gap-3 justify-between">
-            <div>
+            <div className="flex items-start gap-4">
+              {selected.profilePic
+                ? <img src={selected.profilePic} alt={selected.name} className="w-14 h-14 rounded-2xl object-cover border border-slate-200 shrink-0" />
+                : <div className="w-14 h-14 bg-blue-50 rounded-2xl flex items-center justify-center text-blue-600 font-bold text-xl border border-blue-100 shrink-0">{(selected.name || '?').charAt(0)}</div>}
+              <div>
               <button onClick={() => setSelectedId(null)} className="mb-2 flex items-center gap-2 text-slate-500 hover:text-slate-900 font-bold text-sm"><ArrowLeft size={16} /> Back to leads</button>
               <h3 className="font-bold text-xl text-slate-900">{selected.name}</h3>
               <p className="text-sm text-slate-500 mt-1 flex flex-wrap items-center gap-2">
@@ -156,6 +179,7 @@ const MessengerLeads: React.FC = () => {
                 <button onClick={() => setShowFullPsid(!showFullPsid)} className="text-blue-600 font-bold flex items-center gap-1">{showFullPsid ? <EyeOff size={14} /> : <Eye size={14} />}{showFullPsid ? 'Hide' : 'Show full PSID'}</button>
                 <span className={`px-2 py-0.5 rounded-full text-[11px] font-bold border ${STATUS_STYLE[selected.status]}`}>{LEAD_STATUS_LABEL[selected.status]}</span>
               </p>
+              </div>
             </div>
             {selected.status === 'handover' && <button onClick={handleResolve} className="flex items-center gap-2 bg-green-600 text-white font-bold px-5 py-3 rounded-xl hover:bg-green-500"><CheckCircle size={18} /> Mark handover resolved</button>}
             {selected.status !== 'closed' && selected.status !== 'handover' && <button onClick={handleResolve} className="flex items-center gap-2 bg-slate-600 text-white font-bold px-5 py-3 rounded-xl hover:bg-slate-500"><XCircle size={18} /> Close lead</button>}
@@ -165,13 +189,18 @@ const MessengerLeads: React.FC = () => {
 
           <div className="p-6 space-y-4 max-h-[480px] overflow-y-auto bg-slate-50">
             {selected.messages.map((m) => (
-              <div key={m.id} className={`flex ${m.sender === 'owner' ? 'justify-end' : 'justify-start'}`}>
+              <div key={m.id} className={`flex items-end gap-2 ${m.sender === 'owner' ? 'justify-end' : 'justify-start'}`}>
+                {m.sender !== 'owner' && (
+                  m.sender === 'customer' && selected.profilePic
+                    ? <img src={selected.profilePic} alt={selected.name} className="w-8 h-8 rounded-full object-cover border border-slate-200 shrink-0" />
+                    : <div className={`w-8 h-8 rounded-full flex items-center justify-center font-bold text-xs border shrink-0 ${m.sender === 'bot' ? 'bg-indigo-100 text-indigo-600 border-indigo-200' : 'bg-blue-50 text-blue-600 border-blue-100'}`}>{m.sender === 'bot' ? <Bot size={14} /> : (selected.name || '?').charAt(0)}</div>
+                )}
                 <div className="max-w-[75%]">
                   <p className="text-[11px] font-bold text-slate-400 mb-1">{m.sender === 'customer' ? selected.name : m.sender === 'bot' ? 'Bot (Auto)' : 'Owner (you)'}</p>
                   <div className={`px-5 py-3.5 rounded-2xl text-sm leading-relaxed shadow-sm border ${m.sender === 'owner' ? 'bg-blue-600 text-white border-blue-600 rounded-br-sm' : m.sender === 'bot' ? 'bg-indigo-50 border-indigo-100 text-slate-800 rounded-bl-sm' : 'bg-white border-slate-200 text-slate-800 rounded-bl-sm'}`}>
                     <p className="whitespace-pre-wrap">{m.text}</p>
                   </div>
-                  <p className="text-[10px] text-slate-400 mt-1">{new Date(m.created_at).toLocaleString()}{m.delivery === 'pending_send' ? ' • Pending send — webhook not configured' : m.delivery === 'delivered' ? ' • Sent to Messenger' : ''}</p>
+                  <p className="text-[10px] text-slate-400 mt-1">{Number.isNaN(new Date(m.created_at).getTime()) ? '' : new Date(m.created_at).toLocaleString()}{m.delivery === 'pending_send' ? ' • Pending send — webhook not configured' : m.delivery === 'delivered' ? ' • Sent to Messenger' : ''}</p>
                 </div>
               </div>
             ))}

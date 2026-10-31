@@ -167,6 +167,9 @@ export interface MessengerLead {
   sourcePage: string;
   sourcePageId?: string;
   name: string;
+  /** Facebook profile picture URL, when the bot has fetched it
+   *  (the webhook alone only gives a PSID, not a name/picture). */
+  profilePic?: string;
   /** Messenger PSID. Masked in the UI; the full value is only used
    *  internally when posting a reply to the reply webhook. */
   psid: string;

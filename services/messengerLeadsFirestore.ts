@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import {
-  collection, query, where, orderBy, getDocs, onSnapshot, doc, updateDoc,
+  collection, query, where, orderBy, getDocs, getDoc, onSnapshot, doc, updateDoc,
 } from 'firebase/firestore';
 import { dbFirestore } from './firebaseClient';
 import { MessengerLead } from '../types';
@@ -68,21 +68,77 @@ export async function updateFirestoreLead(leadId: string, updates: { status?: st
   }
 }
 
+function normalizeSender(raw: any): MessengerLead['messages'][number]['sender'] {
+  const s = String(raw?.sender ?? raw?.role ?? raw?.from ?? '').trim().toLowerCase();
+  if (s === 'customer' || s === 'user' || s === 'sender' || s === 'customer_message') return 'customer';
+  if (s === 'bot' || s === 'assistant' || s === 'ai' || s === 'page' || s === 'auto') return 'bot';
+  if (s === 'owner' || s === 'admin' || s === 'human' || s === 'agent' || s === 'owner_replied') return 'owner';
+  // Unknown sender values used to fall through to "Owner (you)" in the
+  // UI ternary — never guess owner. A message with no usable sender is
+  // treated as a customer message (the thread is the customer's), and
+  // the bot task must write explicit sender values going forward.
+  return 'customer';
+}
+
+function normalizeCreatedAt(raw: any, fallback: string): string {
+  const v = raw?.created_at ?? raw?.createdAt ?? raw?.timestamp;
+  if (typeof v === 'string' && v) return v;
+  if (typeof v === 'number' && v > 0) return new Date(v).toISOString();
+  if (v && typeof v.seconds === 'number') return new Date(v.seconds * 1000).toISOString();
+  if (v && typeof v.toDate === 'function') {
+    try { return v.toDate().toISOString(); } catch { /* fall through */ }
+  }
+  return fallback;
+}
+
 function mapDoc(d: any): MessengerLead {
   const data = d.data();
+  const updatedAt = data.updated_at || new Date().toISOString();
   return {
     id: d.id,
     ownerId: data.ownerId,
     sourcePage: data.sourcePage || 'Your Facebook Page',
     sourcePageId: data.pageId || undefined,
     name: data.name || 'Unknown',
+    profilePic: data.profilePic || data.profile_pic || data.avatar || undefined,
     psid: data.psid || '',
     status: data.status || 'new',
     lastMessage: data.lastMessage || '',
-    updated_at: data.updated_at || new Date().toISOString(),
-    messages: Array.isArray(data.messages) ? data.messages : [],
+    updated_at: updatedAt,
+    messages: Array.isArray(data.messages) ? data.messages.map((m: any, i: number) => ({
+      id: String(m?.id ?? `msg-${i}`),
+      sender: normalizeSender(m),
+      text: String(m?.text ?? m?.message ?? ''),
+      created_at: normalizeCreatedAt(m, updatedAt),
+      delivery: m?.delivery,
+    })) : [],
     note: data.note,
   };
+}
+
+/** Append an owner reply to a lead's Firestore messages thread, so the
+ *  reply shows in the thread even when the list comes from live
+ *  Firestore (local-only replies were invisible for exactly this
+ *  reason). Read-modify-write: Firestore has no native append for
+ *  this array, same as the bot's Prepare Lead. */
+export async function appendFirestoreMessage(
+  leadId: string,
+  msg: { id: string; sender: 'owner'; text: string; created_at: string; delivery?: 'delivered' | 'pending_send' },
+): Promise<boolean> {
+  try {
+    const ref = doc(dbFirestore, 'messenger_leads', leadId);
+    const snap = await getDoc(ref);
+    const prior = snap.exists() && Array.isArray((snap.data() as any).messages) ? (snap.data() as any).messages : [];
+    await updateDoc(ref, {
+      messages: [...prior, msg],
+      lastMessage: msg.text,
+      status: 'owner_replied',
+      updated_at: msg.created_at,
+    });
+    return true;
+  } catch {
+    return false;
+  }
 }
 
 export async function fetchFirestoreLeads(ownerId: string): Promise<MessengerLead[]> {
