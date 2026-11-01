@@ -1,0 +1,32 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- v3 text styles (programmatic screens use the same sizes/weights). -->
+<resources>
+    <style name="TextScreen">
+        <item name="android:textSize">26sp</item>
+        <item name="android:textStyle">bold</item>
+        <item name="android:lineSpacingMultiplier">1.3</item>
+    </style>
+    <style name="TextSection">
+        <item name="android:textSize">18sp</item>
+        <item name="android:textStyle">bold</item>
+        <item name="android:lineSpacingMultiplier">1.35</item>
+    </style>
+    <style name="TextCard">
+        <item name="android:textSize">16sp</item>
+        <item name="android:textStyle">bold</item>
+        <item name="android:lineSpacingMultiplier">1.4</item>
+    </style>
+    <style name="TextBody">
+        <item name="android:textSize">14sp</item>
+        <item name="android:lineSpacingMultiplier">1.7</item>
+    </style>
+    <style name="TextLabel">
+        <item name="android:textSize">11sp</item>
+        <item name="android:textStyle">bold</item>
+    </style>
+    <style name="TextPrice">
+        <item name="android:textSize">22sp</item>
+        <item name="android:textStyle">bold</item>
+        <item name="android:lineSpacingMultiplier">1.2</item>
+    </style>
+</resources>

@@ -1,26 +1,27 @@
 <?xml version="1.0" encoding="utf-8"?>
+<!-- AutoMateIQ v8 — user-visible strings only, plain user language. -->
 <resources>
     <string name="app_name">AutoMateIQ</string>
     <string name="tagline">মোবাইল ড্যাশবোর্ড</string>
     <string name="login_title">স্বাগতম</string>
-    <string name="login_subtitle">আপনার ড্যাশবোর্ডে প্রবেশ করুন — লগইন অ্যাপের ভিতরেই হবে</string>
-    <string name="continue_google">Continue with Google</string>
-    <string name="firebase_pending_title">Firebase সেটআপ চলছে</string>
-    <string name="firebase_pending_body">Firebase setup pending — app registration in progress। এই Android অ্যাপটি Firebase-এ রেজিস্টার হওয়ার পর Google লগইন অ্যাপের ভিতরেই চালু হবে। ততক্ষণ লগইন ওয়েবসাইটে যাবে না, কারণ সেটাই আগের সমস্যা ছিল।</string>
-    <string name="demo_preview">ডেমো প্রিভিউ দেখুন (আসল ডাটা নয়)</string>
-    <string name="demo_banner">ডেমো প্রিভিউ — এগুলো আসল কাস্টমার বা আসল সাবস্ক্রিপশন নয়</string>
-    <string name="live_banner">লাইভ মোড — ওয়েবসাইটের একই Firebase ডাটাবেস থেকে লিড আসছে</string>
+    <string name="login_subtitle">আপনার ড্যাশবোর্ডে প্রবেশ করুন</string>
+    <string name="continue_google">Google দিয়ে চালিয়ে যান</string>
+    <string name="login_unavailable_title">লগইন করা যাচ্ছে না</string>
+    <string name="login_unavailable_body">লগইন সেবাটি এখন চালু হচ্ছে না। কিছুক্ষণ পর আবার চেষ্টা করুন।</string>
     <string name="no_leads">এখনো কোনো লিড নেই</string>
     <string name="no_leads_hint">কেউ আপনার পেজে মেসেজ করলে এখানে লিড দেখা যাবে।</string>
+    <string name="no_orders">এখনো কোনো অর্ডার নেই</string>
+    <string name="no_orders_hint">নতুন অর্ডার করলে এখানে দেখা যাবে।</string>
+    <string name="no_messages">এখনো কোনো মেসেজ নেই</string>
     <string name="loading">লোড হচ্ছে…</string>
     <string name="retry">আবার চেষ্টা করুন</string>
     <string name="take_over">Take Over</string>
     <string name="resume_ai">Resume AI</string>
     <string name="send">পাঠান</string>
+    <string name="send_status">Messenger-এ পাঠানো হয়েছে</string>
     <string name="reply_hint">রিপ্লাই লিখুন…</string>
     <string name="copy_lead">লিড ডিটেইলস কপি করুন</string>
     <string name="copy_all">সব লিডের সারাংশ কপি করুন</string>
-    <string name="one_time_note">এককালীন প্যাকেজ মাসিক সাবস্ক্রিপশন নয় — তাই এখানে দিনের হিসাব দেখানো হয় না। এককালীনের আলাদা ফাংশন পরে আলোচনা করে ঠিক করা হবে।</string>
-    <string name="token_rules">bKash / Nagad পার্সোনাল • মেয়াদ শেষ হয় না • Pay As You Go • অ্যাডমিন অনুমোদনের পর ক্রেডিট যোগ হয় • ৳২০০ থেকে যেকোনো অ্যামাউন্ট নেওয়া যায় • প্রতি-মেসেজ রেট ওয়েবসাইটে দেওয়া নেই, তাই এখানে কোনো রেট লেখা হয়নি</string>
-    <string name="page_token_note">পেজের টোকেন কখনো অ্যাপের ভিতরে রাখা হয় না, সেটা সার্ভারেই থাকে। অ্যাপ শুধু সার্ভারের মাধ্যমে রিপ্লাই পাঠায়।</string>
+    <string name="one_time_note">এককালীন প্যাকেজ মাসিক সাবস্ক্রিপশন নয় — তাই এখানে দিনের হিসাব দেখানো হয় না।</string>
+    <string name="api_credit_note">bKash / Nagad পার্সোনাল • মেয়াদ শেষ হয় না • Pay As You Go • অ্যাডমিন অনুমোদনের পর ক্রেডিট যোগ হয় • ৳২০০ থেকে যেকোনো অ্যামাউন্ট নেওয়া যায়</string>
 </resources>

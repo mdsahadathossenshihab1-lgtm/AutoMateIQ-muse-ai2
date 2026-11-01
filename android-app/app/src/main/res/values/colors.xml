@@ -1,8 +1,5 @@
 <?xml version="1.0" encoding="utf-8"?>
-<!-- AutoMateIQ v4 design system — colours taken from the AutoMateIQ website
-     (tailwind primary scale + slate text + violet/cyan/pink accents), NOT a
-     random blue. Website: primary #2563EB, deep navy #172554, text #0F172A,
-     secondary #64748B, light surface #EFF6FF, accents #8B5CF6 / #06B6D2. -->
+<!-- AutoMateIQ v8 design v3 — aurora gradients + glass cards. -->
 <resources>
     <color name="primary">#2563EB</color>
     <color name="primary_dark">#1E3A8A</color>
@@ -10,9 +7,16 @@
     <color name="primary_light">#DBEAFE</color>
     <color name="primary_soft">#EFF6FF</color>
     <color name="violet">#8B5CF6</color>
+    <color name="fuchsia">#D946EF</color>
+    <color name="pink">#EC4899</color>
     <color name="cyan">#06B6D2</color>
-    <color name="bg">#F1F5F9</color>
+    <color name="teal">#14B8A6</color>
+    <color name="aurora_top">#EDE9FE</color>
+    <color name="aurora_mid">#ECFEFF</color>
+    <color name="aurora_bot">#FCE7F3</color>
+    <color name="bg">#F5F3FF</color>
     <color name="surface">#FFFFFF</color>
+    <color name="glass">#C8FFFFFF</color>
     <color name="text_primary">#0F172A</color>
     <color name="text_secondary">#64748B</color>
     <color name="border">#E2E8F0</color>
