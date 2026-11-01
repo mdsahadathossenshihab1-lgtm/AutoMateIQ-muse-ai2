@@ -26,9 +26,11 @@ jobs:
         run: |
           ls -lh apk/app-debug.apk
           file apk/app-debug.apk
-          keytool -printcert -jarfile apk/app-debug.apk
+          keytool -printcert -jarfile apk/app-debug.apk || true
           AAPT=$(ls $ANDROID_HOME/build-tools/*/aapt 2>/dev/null | head -n1)
           if [ -n "$AAPT" ]; then "$AAPT" dump badging apk/app-debug.apk | grep -E "package:"; fi
+          APKSIGNER=$(ls $ANDROID_HOME/build-tools/*/apksigner 2>/dev/null | head -n1)
+          if [ -n "$APKSIGNER" ]; then "$APKSIGNER" verify --print-certs apk/app-debug.apk; fi
       - name: Publish APK
         run: |
           ls -l apk
