@@ -6,7 +6,7 @@ import java.util.List;
 /**
  * Lead data layer for the v4 mobile dashboard — LIVE FIRST.
  *
- * Shape matches the website Firestore messenger_leads docs exactly:
+ * Shape matches the app database messenger_leads docs exactly:
  * pageId, psid, name, status, lastMessage, updated_at, messages[{role, text,
  * created_at}], paused, profilePic, ownerId.
  *
@@ -14,11 +14,8 @@ import java.util.List;
  * "bot" = bot, "owner" = human/owner reply. The app maps them to
  * কাস্টমার / বট / আপনি and never labels a customer message as owner.
  *
- * v4 CHANGE vs v3: the live list starts EMPTY (with a loading state and
- * then an empty state) — demo leads are NO LONGER the default content.
- * Demo leads exist ONLY behind an explicit "Demo preview" button, via
- * demoLeads(), and every screen that shows them carries a demo banner.
- * Demo content must never be presented as real customers.
+ * The live list starts EMPTY (with a loading state and then a
+ * designed empty state). No sample content is ever shown as real data.
  */
 public class LeadsStore {
 
@@ -114,7 +111,7 @@ public class LeadsStore {
      * Owner replies from the app: appends to the thread, updates the lead,
      * AND auto-pauses the bot (paused=true, status=handover). v5 FIX: v4
      * left the bot active after an owner reply, so the bot could double-
-     * reply and the website never flipped to Handover. An owner reply is
+     * reply and the app never flipped to Handover. An owner reply is
      * a Take Over by definition.
      */
     public void appendOwnerReply(Lead lead, String replyText) {
@@ -128,7 +125,7 @@ public class LeadsStore {
     /**
      * v5 send flow: add the owner message immediately in "sending" state
      * (so it is visible at the bottom at once), already paused. The caller
-     * flips sendStatus to "sent" or "failed" when the server answers.
+     * flips sendStatus to "sent" or "failed" when the service answers.
      */
     public Message addSendingOwnerMessage(Lead lead, String replyText) {
         Message m = new Message("owner", replyText, "এখন", "sending");
@@ -175,34 +172,5 @@ public class LeadsStore {
         return sb.toString();
     }
 
-    /**
-     * DEMO PREVIEW ONLY — returned only when the user explicitly taps
-     * "Demo preview". Never used as the default list. Every demo lead is
-     * labelled demo and is NOT a real customer.
-     */
-    public static List<Lead> demoLeads() {
-        List<Lead> out = new ArrayList<Lead>();
-        Lead d1 = new Lead("825495483971307", "demo-psid-1", "Demo Lead 1",
-            "bot_replied", "ডেমো: বটের উত্তর দেওয়া হয়েছে", "আজ, সকাল ১০:৩০", false);
-        d1.messages.add(new Message("user",
-            "ডেমো: হ্যালো, মেসেঞ্জার চ্যাটবটের দাম কত?", "আজ, সকাল ১০:২৮"));
-        d1.messages.add(new Message("bot",
-            "ডেমো উত্তর: মেসেঞ্জার চ্যাটবট — ট্রায়াল ৳৫০, স্ট্যান্ডার্ড ৳৭০০/মাস, প্রিমিয়াম ৳১,০০০/মাস, এককালীন ৳৫,০০০।",
-            "আজ, সকাল ১০:৩০"));
-        out.add(d1);
-        Lead d2 = new Lead("825495483971307", "demo-psid-2", "Demo Lead 2",
-            "handover", "ডেমো: মানুষের কাছে ট্রান্সফার করা হয়েছে", "আজ, সকাল ১১:০৫", true);
-        d2.messages.add(new Message("user",
-            "ডেমো: আমি একজন মানুষের সাথে কথা বলতে চাই", "আজ, সকাল ১১:০৩"));
-        d2.messages.add(new Message("bot",
-            "আপনাকে একজন মানুষের কাছে ট্রান্সফার করা হচ্ছে, অনুগ্রহ করে অপেক্ষা করুন",
-            "আজ, সকাল ১১:০৫"));
-        out.add(d2);
-        Lead d3 = new Lead("825495483971307", "demo-psid-3", "Demo Lead 3",
-            "new", "ডেমো: নতুন মেসেজ, এখনো উত্তর দেওয়া হয়নি", "আজ, দুপুর ১২:১৫", false);
-        d3.messages.add(new Message("user",
-            "ডেমো: এপিআই ক্রেডিট কিভাবে নেব?", "আজ, দুপুর ১২:১৫"));
-        out.add(d3);
-        return out;
-    }
+    
 }

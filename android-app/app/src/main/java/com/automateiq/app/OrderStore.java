@@ -4,14 +4,14 @@ import java.util.ArrayList;
 import java.util.List;
 
 /**
- * Order model for the v6 app — SAME shape as the website Firestore
- * 'orders' collection (see website types.ts Order):
+ * Order model for the v6 app — SAME shape as the app database
+ * 'orders' collection (see app types.ts Order):
  * id, userId, userName, serviceName, packageDetails, amount,
  * paymentMethod, senderPhone, trxId, status, date,
  * clientPageLink, clientRequirements, adminMessage,
  * startDate, completionDate.
  *
- * Status flow (website rules, new flow only — 'approved'/'rejected'
+ * Status flow (app rules, new flow only — 'approved'/'rejected'
  * are legacy and are never created by this app):
  * pending -> in_progress -> completed / cancelled.
  *
@@ -22,7 +22,7 @@ import java.util.List;
  * the user explicitly deferred — nothing one-time-specific is built).
  *
  * PRIVACY: the form collects the BUYER's payment details (their
- * senderPhone + trxId), exactly like the website order form. It must
+ * senderPhone + trxId), exactly like the app order form. It must
  * NEVER display AutoMateIQ's own phone/email/contact anywhere.
  */
 public class OrderStore {
@@ -140,17 +140,5 @@ public class OrderStore {
             latest.amount, latest.dateMillis, 1);
     }
 
-    /** DEMO PREVIEW ONLY — never the default order list. */
-    public static List<Order> demoOrders() {
-        List<Order> out = new ArrayList<Order>();
-        long now = System.currentTimeMillis();
-        Order d = new Order("demo-order-1", "demo-user", "Demo Customer",
-            "মেসেঞ্জার চ্যাটবট", "প্রিমিয়াম (মাসিক)", "৳১,০০০",
-            "bkash", "01XXXXXXXXX", "DEMO123", "in_progress",
-            "ডেমো তারিখ", now - 10L * 24 * 60 * 60 * 1000,
-            "", "ডেমো: কোনো বাড়তি তথ্য নেই", "monthly");
-        d.adminMessage = "ডেমো: অ্যাডমিন মেসেজ";
-        out.add(d);
-        return out;
-    }
+    
 }

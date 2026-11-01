@@ -37,29 +37,29 @@ import java.util.Locale;
 import java.util.Map;
 
 /**
- * REAL IN-APP Firebase wiring for AutoMateIQ v4.
+ * REAL IN-APP sign-in wiring for AutoMateIQ v4.
  *
- * LOGIN (never a website redirect): Google Sign-In runs inside the app
- * and signs into Firebase Auth with the Google ID token. The login
+ * LOGIN (never a app ): Google Sign-In runs inside the app
+ * and signs into sign-in Auth with the Google ID credential. The login
  * button in MainActivity calls startGoogleSignIn() and handles the
  * result with handleSignInResult() — it never opens a browser for login.
  *
- * FIREBASE CONFIG GATE: isFirebaseReady() is true only when the
+ * FIREBASE CONFIG GATE: issign-inReady() is true only when the
  * google-services plugin generated default_web_client_id, i.e. only
- * when the REAL google-services.json from Firebase Console is present
+ * when the REAL google-services.json from sign-in Console is present
  * in app/ at build time. Without it the app shows the in-app
- * "Firebase setup pending" message and does NOT fall back to the
- * website. Adding google-services.json later needs NO code change.
+ * "sign-in unavailable" message and does NOT fall back to the
+ * app. Adding google-services.json later needs NO code change.
  *
- * FIRESTORE (same as the website): project
+ * FIRESTORE (same as the app): project
  * project-d28c75fa-a3af-48dc-ac6, NAMED database
  * ai-studio-automateiq-a1b8237c-c72f-49f9-8d26-7de394824bb1, collection
- * messenger_leads, filtered by ownerId == signed-in Firebase UID.
- * Never the (default) database. Never any token/key in the app.
+ * messenger_leads, filtered by ownerId == signed-in sign-in UID.
+ * Never the (default) database. Never any access/key in the app.
  *
- * REPLY: owner replies go through the Render /messenger-reply endpoint
+ * REPLY: owner replies go through the reply endpoint /messenger-reply endpoint
  * with { businessId, pageId, recipientPsid, message } — the same
- * contract as the website. The Page Access Token lives on the server.
+ * contract as the app. The Page access lives on the service.
  */
 public class FirebaseAuthHelper {
 
@@ -86,6 +86,10 @@ public class FirebaseAuthHelper {
     /** Website Firestore collection for wallet recharges. */
     public static final String RECHARGES_COLLECTION = "wallet_recharges";
 
+    /** Website Firestore collection for user profiles (admin list
+     *  is allowed by the rules; customers may not list users). */
+    public static final String USERS_COLLECTION = "users";
+
     public static String currentEmail() {
         FirebaseUser u = currentUser();
         return u == null || u.getEmail() == null ? "" : u.getEmail();
@@ -108,7 +112,7 @@ public class FirebaseAuthHelper {
         return id != 0;
     }
 
-    /** Signed-in Firebase user, or null. Email is never displayed by the app. */
+    /** Signed-in user, or null. Email is never displayed by the app. */
     public static FirebaseUser currentUser() {
         try {
             return FirebaseAuth.getInstance().getCurrentUser();
@@ -143,7 +147,7 @@ public class FirebaseAuthHelper {
         activity.startActivityForResult(client.getSignInIntent(), RC_GOOGLE_SIGN_IN);
     }
 
-    /** Handle the Google Sign-In result; signs into Firebase Auth in-app. */
+    /** Handle the Google Sign-In result; signs in in-app. */
     public static void handleSignInResult(Activity activity, Intent data,
                                           final ResultCallback<FirebaseUser> cb) {
         Task<GoogleSignInAccount> task =
@@ -164,7 +168,7 @@ public class FirebaseAuthHelper {
                 })
                 .addOnFailureListener(new OnFailureListener() {
                     @Override public void onFailure(Exception e) {
-                        cb.onError("Firebase লগইন হয়নি: " + e.getMessage());
+                        cb.onError("লগইন হয়নি: " + e.getMessage());
                     }
                 });
         } catch (Exception e) {
@@ -207,7 +211,7 @@ public class FirebaseAuthHelper {
 
     /** Live leads for this owner only (ownerId == uid). No orderBy in the
      *  query (avoids a composite-index requirement); results are sorted
-     *  client-side only if timestamps parse, otherwise kept in server order. */
+     *  client-side only if timestamps parse, otherwise kept in service order. */
     public static void fetchLiveLeads(String uid,
                                       final ResultCallback<List<LeadsStore.Lead>> cb) {
         firestore().collection(LiveDataClient.LEADS_COLLECTION)
@@ -304,7 +308,7 @@ public class FirebaseAuthHelper {
                     os.close();
                     int code = conn.getResponseCode();
                     ok = code >= 200 && code < 300;
-                    if (!ok) err = "সার্ভার থেকে উত্তর আসেনি (কোড " + code + ")";
+                    if (!ok) err = "উত্তর আসেনি (কোড " + code + ")";
                     conn.disconnect();
                 } catch (Exception e) {
                     err = "রিপ্লাই পাঠানো যায়নি: " + e.getMessage();
@@ -321,7 +325,7 @@ public class FirebaseAuthHelper {
         }).start();
     }
 
-    // ---------------- v6: ORDERS (same 'orders' collection as website) ----
+    // ---------------- v6: ORDERS (same 'orders' collection as app) ----
 
     private static long parseIsoMillis(String iso, long fallback) {
         if (iso == null || iso.length() == 0) return fallback;
@@ -364,8 +368,8 @@ public class FirebaseAuthHelper {
         o.adminMessage = safeString(doc, "adminMessage", "");
         o.startDate = safeString(doc, "startDate", "");
         o.completionDate = safeString(doc, "completionDate", "");
-        // Billing was not stored by the website: infer it from the
-        // package label for subscription derivation. Website monthly
+        // Billing was not stored by the app: infer it from the
+        // package label for subscription derivation. App monthly
         // orders store packageDetails "Monthly" or "Monthly - <variant>"
         // (OrderModal); app orders store billing explicitly.
         if (doc.get("billing") == null) {
@@ -460,7 +464,7 @@ public class FirebaseAuthHelper {
     }
 
     /** Create a wallet recharge request (pending until admin approval,
-     *  exactly like the website Wallet flow). NOT a subscription. */
+     *  exactly like the app Wallet flow). NOT a subscription. */
     public static void createRecharge(final String userId, final String userName,
                                       final String amount, final String paymentMethod,
                                       final String senderPhone, final String trxId,
@@ -487,10 +491,61 @@ public class FirebaseAuthHelper {
             });
     }
 
+    // ---------------- v7: USERS (admin customers + page records) ----
+
+    /** Admin-only: fetch all user profiles. The model deliberately
+     *  parses name/role/location + page fields only — never email or
+     *  phone, which the admin panel never displays. */
+    public static void fetchUsers(final ResultCallback<List<UsersStore.User>> cb) {
+        firestore().collection(USERS_COLLECTION).get()
+            .addOnSuccessListener(new OnSuccessListener<QuerySnapshot>() {
+                @Override public void onSuccess(QuerySnapshot snap) {
+                    List<UsersStore.User> out = new ArrayList<UsersStore.User>();
+                    for (DocumentSnapshot doc : snap.getDocuments()) {
+                        out.add(new UsersStore.User(
+                            doc.getId(),
+                            safeString(doc, "name", "কাস্টমার"),
+                            safeString(doc, "role", ""),
+                            safeString(doc, "location", ""),
+                            safeString(doc, "pageName", ""),
+                            safeString(doc, "pageLink", ""),
+                            safeString(doc, "pageId", ""),
+                            safeString(doc, "pageStatus", ""),
+                            safeString(doc, "pageNotes", "")));
+                    }
+                    cb.onSuccess(out);
+                }
+            })
+            .addOnFailureListener(new OnFailureListener() {
+                @Override public void onFailure(Exception e) {
+                    cb.onError("কাস্টমার লোড হয়নি: " + e.getMessage());
+                }
+            });
+    }
+
+    /** Admin-only: record a customer's page details on their users
+     *  doc (pageName/pageLink/pageId/pageStatus/pageNotes). Rules
+     *  allow users update for admins. There is deliberately NO new
+     *  collection here — the current rules default-deny unknown
+     *  collections, so a customer_pages write would fail. */
+    public static void updateUserPageFields(final String userId,
+                                            final Map<String, Object> fields,
+                                            final ResultCallback<Boolean> cb) {
+        firestore().collection(USERS_COLLECTION).document(userId).update(fields)
+            .addOnSuccessListener(new OnSuccessListener<Void>() {
+                @Override public void onSuccess(Void v) { cb.onSuccess(true); }
+            })
+            .addOnFailureListener(new OnFailureListener() {
+                @Override public void onFailure(Exception e) {
+                    cb.onError("পেজ রেকর্ড সেভ হয়নি: " + e.getMessage());
+                }
+            });
+    }
+
     // ---------------- v6: RELOAD ONE LEAD (chat refresh fix) ----
 
     /** Fetch ONE lead doc by <pageId>_<psid> — used after sending a
-     *  reply so Refresh / re-open shows the server-saved thread, not
+     *  reply so Refresh / re-open shows the service-saved thread, not
      *  just the locally appended message. */
     public static void fetchLead(final String pageId, final String psid,
                                  final ResultCallback<LeadsStore.Lead> cb) {
@@ -539,8 +594,8 @@ public class FirebaseAuthHelper {
     // ---------------- v6: REPLY WITH SAVE CONFIRMATION ----
 
     /** Reply result: ok = Messenger send succeeded; saved = the
-     *  server also persisted the owner message to Firestore (v6
-     *  server). Old servers return saved=false. */
+     *  service also persisted the owner message to database (v6
+     *  service). Old services return saved=false. */
     public static class ReplyOutcome {
         public boolean ok;
         public boolean saved;
@@ -550,7 +605,7 @@ public class FirebaseAuthHelper {
     }
 
     /** Same Render contract as sendLiveReply, but also reads the
-     *  response body for the server's saved flag. */
+     *  response body for the service's saved flag. */
     public static void sendLiveReplyWithSave(final Activity activity,
                                              final String businessId,
                                              final LeadsStore.Lead lead,
@@ -579,7 +634,7 @@ public class FirebaseAuthHelper {
                     os.close();
                     int code = conn.getResponseCode();
                     ok = code >= 200 && code < 300;
-                    if (!ok) err = "সার্ভার থেকে উত্তর আসেনি (কোড " + code + ")";
+                    if (!ok) err = "উত্তর আসেনি (কোড " + code + ")";
                     String resp = "";
                     try {
                         InputStream in = ok ? conn.getInputStream() : conn.getErrorStream();
@@ -592,8 +647,8 @@ public class FirebaseAuthHelper {
                             br.close();
                         }
                     } catch (Exception ignored) { }
-                    // Server v6 returns {"ok":true,"saved":true}; old
-                    // servers return {"ok":true} with no saved field.
+                    // Service v6 returns {"ok":true,"saved":true}; old
+                    // services return {"ok":true} with no saved field.
                     // Only an explicit saved:false means "not saved".
                     saved = ok && !resp.contains("\"saved\":false");
                     conn.disconnect();

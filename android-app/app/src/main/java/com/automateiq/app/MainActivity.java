@@ -1,6 +1,12 @@
 package com.automateiq.app;
 
 import android.app.Activity;
+import android.animation.ObjectAnimator;
+import android.animation.ArgbEvaluator;
+import android.animation.ValueAnimator;
+import android.view.MotionEvent;
+import android.widget.HorizontalScrollView;
+import android.widget.ProgressBar;
 import android.content.ClipData;
 import android.content.ClipboardManager;
 import android.content.Context;
@@ -27,53 +33,19 @@ import java.util.ArrayList;
 import java.util.List;
 
 /**
- * AutoMateIQ Mobile Dashboard v6.0 — IN-APP ORDERS + ORDER MANAGEMENT +
- * SUBSCRIPTION FROM REAL ORDERS + CHAT REFRESH FIX.
- *
- * v6 ADDS (user feedback 2026-11-01 23:29): orders are placed and
- * managed INSIDE the app (no website redirect for ordering), using
- * the same Firestore 'orders' collection/shape as the website;
- * My Subscription is derived from real monthly orders (date + 1
- * month, days remaining); and the chat refresh bug is fixed by
- * making the Render server the single writer of owner messages
- * into Firestore, with the app reloading the lead doc after send.
- *
- * v5 FIXES THE v4 CHAT BUG (user feedback 2026-11-01 22:47): v4 put the WHOLE
- * app in ONE ScrollView and render() scrolled to top, so a thread opened at
- * the OLDEST message, the composer sat below all messages, and after send
- * the view jumped to top again so the sent message was invisible. v5 does
- * NOT do that: the thread has its OWN ScrollView, a PINNED bottom composer,
- * opens at the LATEST message, and stays at the bottom after send.
- * Owner replies also auto-pause the bot now (paused=true, status=handover,
- * written to Firestore too), so the bot cannot double-reply.
- * No WebView anywhere. No phone number or email is shown anywhere.
- *
- * What changed vs v3 (the design the user rejected as "একদম বাজে"):
- * - A real design system, taken from the AutoMateIQ website palette
- *   (primary #2563EB, deep navy #172554, slate text #0F172A, light
- *   surface #EFF6FF, violet #8B5CF6 / cyan #06B6D2 accents), instead of
- *   plain unstyled Views: consistent typography scale, 16dp page
- *   padding, 20dp rounded cards with elevation, a proper top app bar,
- *   a bottom navigation bar with a selected pill state, coloured
- *   status chips, chat bubbles, a subscription progress bar, and a
- *   loading / empty / error state on every list — never a blank screen,
- *   never a dead button.
- * - LOGIN IS IN-APP: "Continue with Google" starts Google Sign-In +
- *   Firebase Auth inside the app (FirebaseAuthHelper). It NEVER opens
- *   the website for login. Without the real google-services.json the
- *   button shows the in-app "Firebase setup pending" screen instead.
- * - LIVE FIRST: leads come from the website Firestore database
- *   (named database, ownerId filter). Demo content exists ONLY behind
- *   the explicit "Demo preview" button, never as the default list.
- * - No WebView anywhere. No phone number or email is shown anywhere.
- *   Verified prices only; Vibe Coding / Combo show no price;
- *   per-message rate is never invented. One-time packages get NO
- *   days-remaining display and NO separate one-time function yet
- *   (user will discuss that later).
+ * AutoMateIQ Mobile Dashboard v8.0 — built exactly to approved design v3
+ * (2026-11-02): aurora/glass skin, vector icons, v3 typography scale and
+ * subtle entry/press/progress animations, with plain user language in
+ * every visible string. Backend kept from v7: role gating (admin panel
+ * vs customer panel), orders, subscription derived from monthly orders,
+ * wallet / API Credit recharge, leads + chat thread, customers, page
+ * records with user-step onboarding, and auto-expire on admin load.
+ * No sample content exists in this build: empty data shows a designed
+ * empty state, and a failed load shows an error state with Retry.
  */
 public class MainActivity extends Activity {
 
-    // ---- Design tokens (website palette) ----
+    // ---- Design accesss (app palette) ----
     private static final int PRIMARY = 0xFF2563EB;
     private static final int PRIMARY_DARK = 0xFF1E3A8A;
     private static final int NAVY = 0xFF172554;
@@ -92,6 +64,13 @@ public class MainActivity extends Activity {
     private static final int AMBER_SOFT = 0xFFFEF3C7;
     private static final int RED = 0xFFDC2626;
     private static final int RED_SOFT = 0xFFFEE2E2;
+    private static final int PINK = 0xFFEC4899;
+    private static final int FUCHSIA = 0xFFD946EF;
+    private static final int TEAL = 0xFF14B8A6;
+    private static final int AURORA_TOP = 0xFFEDE9FE;
+    private static final int AURORA_MID = 0xFFECFEFF;
+    private static final int AURORA_BOT = 0xFFFCE7F3;
+    private static final int GLASS = 0xC8FFFFFF;
 
     // ---- Screens ----
     private static final int S_LOGIN = 0;
@@ -110,6 +89,15 @@ public class MainActivity extends Activity {
     private static final int S_ORDER_DETAIL = 13;
     private static final int S_ORDER_FORM = 14;
     private static final int S_RECHARGE_FORM = 15;
+    // v7 ROLE PANELS: admin-only screens. Customer-only screens are
+    // S_SERVICES / S_SERVICE_DETAIL / S_SUBS / S_TOKENS / S_MY_SUB /
+    // S_ORDER_FORM / S_RECHARGE_FORM. S_ORDERS and S_ORDER_DETAIL are
+    // shared but role-filtered inside (admin = all orders + status
+    // buttons; customer = own orders only, no status buttons).
+    private static final int S_CUSTOMERS = 16;
+    private static final int S_CUSTOMER_DETAIL = 17;
+    private static final int S_PAGES = 18;
+    private static final int S_PAGE_FORM = 19;
 
     private LinearLayout root;
     private LinearLayout topBar;
@@ -133,7 +121,6 @@ public class MainActivity extends Activity {
     private SubscriptionStore.Subscription mySubscription = null;
 
     private boolean signedIn = false;
-    private boolean demoMode = false;
     private boolean leadsLoading = false;
     private String leadsError = null;
     private String loginError = null;
@@ -142,7 +129,7 @@ public class MainActivity extends Activity {
     private LeadsStore.Lead currentLead = null;
     private Service currentService = null;
 
-    // v6 ORDERS: live list from Firestore 'orders' (same as website).
+    // v6 ORDERS: live list from database 'orders' (same as app).
     private List<OrderStore.Order> orders = new ArrayList<OrderStore.Order>();
     private boolean ordersLoaded = false;
     private boolean ordersLoading = false;
@@ -154,8 +141,21 @@ public class MainActivity extends Activity {
     // Status of the monthly order behind mySubscription (for the
     // "awaiting admin approval" note on a pending subscription).
     private String mySubscriptionOrderStatus = "";
+    // v7 ADMIN: customers + page records + auto-expire state.
+    private java.util.List<UsersStore.User> users = new java.util.ArrayList<UsersStore.User>();
+    private boolean usersLoaded = false;
+    private boolean usersLoading = false;
+    private String usersError = null;
+    private UsersStore.User currentCustomer = null;
+    // Page record being edited in S_PAGE_FORM (null = new record).
+    private UsersStore.User pendingPageUser = null;
+    // Session-only page records whose service save failed or whose
+    // userId was not found — shown flagged, never as saved records.
+    private java.util.List<UsersStore.User> localPageRecords = new java.util.ArrayList<UsersStore.User>();
+    private int autoExpireCount = 0;
+    private boolean autoExpireRunForLoad = false;
 
-    // ---- Services (verified website prices only) ----
+    // ---- Services (verified app prices only) ----
     private static class Service {
         String icon, name, desc, from, color;
         String[] prices;
@@ -169,46 +169,46 @@ public class MainActivity extends Activity {
     }
 
     private static final Service[] SERVICES = new Service[] {
-        new Service("💬", "মেসেঞ্জার চ্যাটবট",
+        new Service("ic_chat", "মেসেঞ্জার চ্যাটবট",
             "ফেসবুক পেজে কাস্টমার মেসেজ করলে ২৪ ঘণ্টা স্বয়ংক্রিয় উত্তর দেবে, মালিক অনলাইনে না থাকলেও।",
             "৳৫০ থেকে শুরু", "#2563EB",
             new String[]{"ট্রায়াল ৭ দিন — ৳৫০", "স্ট্যান্ডার্ড — ৳৭০০/মাস",
                          "প্রিমিয়াম — ৳১,০০০/মাস", "এককালীন — ৳৫,০০০"},
             new String[]{"২৪ ঘণ্টা অটো রিপ্লাই", "মানুষের কাছে হ্যান্ডওভার",
                          "এককালীন প্যাকেজে ৳৫০০ ফ্রি ক্রেডিট"}),
-        new Service("📸", "ইনস্টাগ্রাম চ্যাটবট",
+        new Service("ic_camera", "ইনস্টাগ্রাম চ্যাটবট",
             "ইনস্টাগ্রাম ডিএম এবং স্টোরি রিপ্লাই অটোমেশন। বিজনেস গ্রোথ এবং এনগেজমেন্ট বৃদ্ধি।",
             "৳৫০ থেকে শুরু", "#8B5CF6",
             new String[]{"ট্রায়াল — ৳৫০", "স্ট্যান্ডার্ড — ৳৭০০/মাস",
                          "প্রিমিয়াম — ৳১,০০০/মাস", "এককালীন — ৳৫,০০০"},
             new String[]{"ইনস্টাগ্রাম ডিএম অটো রিপ্লাই", "স্টোরি রিপ্লাই অটোমেশন"}),
-        new Service("🟢", "হোয়াটসঅ্যাপ বিজনেস বট",
+        new Service("ic_chat", "হোয়াটসঅ্যাপ বিজনেস বট",
             "হোয়াটসঅ্যাপে কাস্টমারের সাথে স্বয়ংক্রিয় কথোপকথন ও ক্যাটালগ দেখানো।",
             "৳৫০ থেকে শুরু", "#16A34A",
             new String[]{"ট্রায়াল — ৳৫০", "স্ট্যান্ডার্ড সেটআপ — ৳১,৫০০",
                          "এককালীন — ৳৫,০০০"},
             new String[]{"হোয়াটসঅ্যাপে প্রোডাক্ট ক্যাটালগ দেখানো", "স্বয়ংক্রিয় কথোপকথন"}),
-        new Service("📘", "ফেসবুক অটো পোস্ট",
+        new Service("ic_page", "ফেসবুক অটো পোস্ট",
             "ফেসবুক পেজে স্বয়ংক্রিয়ভাবে পোস্ট প্রকাশ করা।",
             "৳৫০ থেকে শুরু", "#1D4ED8",
             new String[]{"ট্রায়াল — ৳৫০", "মাসিক — ৳১,০০০", "এককালীন — ৳৫,০০০"},
             new String[]{"নির্ধারিত সময়ে অটো পোস্ট", "কন্টেন্ট শিডিউল"}),
-        new Service("▶️", "ইউটিউব অটো পোস্ট",
+        new Service("ic_page", "ইউটিউব অটো পোস্ট",
             "ইউটিউব চ্যানেলে স্বয়ংক্রিয়ভাবে পোস্ট প্রকাশ করা।",
             "৳৫০ থেকে শুরু", "#DC2626",
             new String[]{"ট্রায়াল — ৳৫০", "মাসিক — ৳১,০০০", "এককালীন — ৳৫,০০০"},
             new String[]{"চ্যানেলে অটো পোস্ট", "কন্টেন্ট শিডিউল"}),
-        new Service("🤝", "ফেসবুক + ইনস্টাগ্রাম কম্বো",
-            "ফেসবুক ও ইনস্টাগ্রাম দুই প্ল্যাটফর্মের অটোমেশন একসাথে। দাম ওয়েবসাইটে দেওয়া নেই — প্রতিনিধি জানিয়ে দেবেন।",
+        new Service("ic_grid", "ফেসবুক + ইনস্টাগ্রাম কম্বো",
+            "ফেসবুক ও ইনস্টাগ্রাম দুই প্ল্যাটফর্মের অটোমেশন একসাথে। দাম জানতে চাইলে হ্যান্ডওভার করা হবে — প্রতিনিধি জানিয়ে দেবেন।",
             "দাম জানতে জিজ্ঞাসা করুন", "#06B6D2",
-            new String[]{"দাম ওয়েবসাইটে দেওয়া নেই — প্রতিনিধি জানাবেন"},
+            new String[]{"দাম জানতে চাইলে হ্যান্ডওভার করা হবে — প্রতিনিধি জানাবেন"},
             new String[]{"দুই প্ল্যাটফর্ম একসাথে", "এক জায়গায় ম্যানেজমেন্ট"}),
-        new Service("💻", "ভাইব কোডিং",
-            "আইডিয়া থেকে অ্যাপ/ওয়েবসাইট বানানো। দাম জানতে চাইলে শুধু ট্রান্সফার করা হয় — প্রতিনিধি বিস্তারিত জানাবেন।",
+        new Service("ic_grid", "ভাইব কোডিং",
+            "আইডিয়া থেকে অ্যাপ বানানো। দাম জানতে চাইলে শুধু ট্রান্সফার করা হয় — প্রতিনিধি বিস্তারিত জানাবেন।",
             "দাম জানতে জিজ্ঞাসা করুন", "#0F172A",
             new String[]{"দাম জানতে চাইলে প্রতিনিধির কাছে ট্রান্সফার করা হয়"},
             new String[]{"আইডিয়া থেকে প্রোডাক্ট", "দ্রুত ডেলিভারি"}),
-        new Service("🪙", "এপিআই ক্রেডিট ওয়ালেট",
+        new Service("ic_wallet", "এপিআই ক্রেডিট ওয়ালেট",
             "এপিআই ব্যবহারের জন্য ক্রেডিট রিচার্জ। ৳২০০ থেকে শুরু, যত টাকার এপিআই চান নিতে পারবেন।",
             "৳২০০ থেকে শুরু", "#D97706",
             new String[]{"রিচার্জ — ৳২০০, ৳৫০০, ৳১,০০০, ৳২,৫০০"},
@@ -220,12 +220,12 @@ public class MainActivity extends Activity {
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
         buildShell();
-        // Resume an existing Firebase session in-app (no website involved).
+        // Resume an existing sign-in session in-app (no app involved).
         if (FirebaseAuthHelper.currentUser() != null) {
             signedIn = true;
-            demoMode = false;
             loadLiveLeads();
             loadLiveOrders();
+            if (FirebaseAuthHelper.isAdmin()) loadLiveUsers();
             go(S_DASH, false);
         } else {
             go(S_LOGIN, false);
@@ -240,10 +240,10 @@ public class MainActivity extends Activity {
                 new FirebaseAuthHelper.ResultCallback<com.google.firebase.auth.FirebaseUser>() {
                     @Override public void onSuccess(com.google.firebase.auth.FirebaseUser user) {
                         signedIn = true;
-                        demoMode = false;
-                        loginError = null;
+                                    loginError = null;
                         loadLiveLeads();
                         loadLiveOrders();
+                        if (FirebaseAuthHelper.isAdmin()) loadLiveUsers();
                         go(S_DASH, false);
                     }
                     @Override public void onError(String message) {
@@ -258,18 +258,43 @@ public class MainActivity extends Activity {
     public void onBackPressed() {
         if (screen == S_LOGIN) { super.onBackPressed(); return; }
         if (!backStack.isEmpty()) {
-            screen = backStack.remove(backStack.size() - 1);
+            screen = gateScreen(backStack.remove(backStack.size() - 1));
             render();
-        } else if (signedIn || demoMode) {
+        } else if (signedIn) {
             go(S_DASH, false);
         } else {
             super.onBackPressed();
         }
     }
 
+    // v7 ROLE GATE: after login, each role sees ONLY its own panel.
+    // Role gate: after login, each role sees ONLY its own panel. No role switcher exists by design.
+    private int gateScreen(int next) {
+        if (!signedIn) return next;
+        if (next == S_LOGIN || next == S_PENDING) return next;
+        boolean admin = FirebaseAuthHelper.isAdmin();
+        if (admin) {
+            switch (next) {
+                case S_SERVICES: case S_SERVICE_DETAIL: case S_SUBS:
+                case S_TOKENS: case S_MY_SUB: case S_ORDER_FORM:
+                case S_RECHARGE_FORM:
+                    return S_DASH;
+                default: return next;
+            }
+        } else {
+            switch (next) {
+                case S_CUSTOMERS: case S_CUSTOMER_DETAIL: case S_PAGES:
+                case S_PAGE_FORM: case S_LEADS: case S_LEAD_DETAIL:
+                case S_CONNECT:
+                    return S_DASH;
+                default: return next;
+            }
+        }
+    }
+
     private void go(int next, boolean push) {
         if (push) backStack.add(screen);
-        screen = next;
+        screen = gateScreen(next);
         render();
     }
 
@@ -298,26 +323,20 @@ public class MainActivity extends Activity {
             });
     }
 
-    private void enterDemoPreview() {
-        demoMode = true;
-        signedIn = false;
-        leadsStore.setLiveLeads(LeadsStore.demoLeads());
-        mySubscription = SubscriptionStore.demoSubscription();
-        orders = OrderStore.demoOrders();
-        ordersLoaded = true;
-        leadsLoading = false;
-        leadsError = null;
-        notice = "ডেমো প্রিভিউ চলছে — এগুলো আসল কাস্টমার নয়।";
-        go(S_DASH, false);
-    }
 
     private void logout() {
         FirebaseAuthHelper.signOut(this);
         signedIn = false;
-        demoMode = false;
         mySubscription = null;
         orders = new ArrayList<OrderStore.Order>();
         ordersLoaded = false;
+        users = new java.util.ArrayList<UsersStore.User>();
+        usersLoaded = false;
+        usersError = null;
+        currentCustomer = null;
+        pendingPageUser = null;
+        localPageRecords = new java.util.ArrayList<UsersStore.User>();
+        autoExpireCount = 0;
         currentOrder = null;
         selectedPackage = null;
         leadsStore.setLiveLeads(new ArrayList<LeadsStore.Lead>());
@@ -329,7 +348,9 @@ public class MainActivity extends Activity {
     private void buildShell() {
         root = new LinearLayout(this);
         root.setOrientation(LinearLayout.VERTICAL);
-        root.setBackgroundColor(BG);
+        root.setBackground(new GradientDrawable(
+            GradientDrawable.Orientation.TL_BR,
+            new int[]{AURORA_TOP, AURORA_MID, AURORA_BOT}));
 
         topBar = new LinearLayout(this);
         topBar.setOrientation(LinearLayout.HORIZONTAL);
@@ -370,6 +391,7 @@ public class MainActivity extends Activity {
     }
 
     private void renderTopBar() {
+        v3AnimIndex = 0;
         topBar.removeAllViews();
         TextView logo = new TextView(this);
         logo.setText("A");
@@ -386,14 +408,16 @@ public class MainActivity extends Activity {
         titles.setOrientation(LinearLayout.VERTICAL);
         titles.setPadding(dp(10), 0, 0, 0);
         TextView t = text("AutoMateIQ", 18, TEXT, true);
-        TextView s = text("মোবাইল ড্যাশবোর্ড • v6.0", 12, TEXT2, false);
+        String roleLabel = (!signedIn ? "মোবাইল ড্যাশবোর্ড • v8.0"
+            : (FirebaseAuthHelper.isAdmin() ? "অ্যাডমিন প্যানেল • v8.0" : "কাস্টমার প্যানেল • v8.0"));
+        TextView s = text(roleLabel, 12, TEXT2, false);
         titles.addView(t);
         titles.addView(s);
         LinearLayout.LayoutParams tp = new LinearLayout.LayoutParams(0,
             ViewGroup.LayoutParams.WRAP_CONTENT, 1f);
         topBar.addView(titles, tp);
 
-        if (signedIn || demoMode) {
+        if (signedIn) {
             TextView out = new TextView(this);
             out.setText("লগআউট");
             out.setTextSize(13);
@@ -415,13 +439,21 @@ public class MainActivity extends Activity {
             return;
         }
         bottomNav.setVisibility(View.VISIBLE);
-        String[][] items = {
-            {"🏠", "ড্যাশবোর্ড", String.valueOf(S_DASH)},
-            {"💬", "লিডস", String.valueOf(S_LEADS)},
-            {"🔗", "কানেক্ট", String.valueOf(S_CONNECT)},
-            {"🛍️", "সার্ভিস", String.valueOf(S_SERVICES)},
-            {"📦", "অর্ডার", String.valueOf(S_ORDERS)},
-            {"📅", "সাবস্ক্রিপশন", String.valueOf(S_SUBS)},
+        // v7: nav differs by role — admin never sees purchase tabs,
+        // customer never sees admin tabs.
+        boolean isAdminNav = signedIn && FirebaseAuthHelper.isAdmin();
+        String[][] items = isAdminNav ? new String[][]{
+            {"ic_home", "ড্যাশবোর্ড", String.valueOf(S_DASH)},
+            {"ic_list", "অর্ডার", String.valueOf(S_ORDERS)},
+            {"ic_users", "কাস্টমার", String.valueOf(S_CUSTOMERS)},
+            {"ic_page", "পেজ", String.valueOf(S_PAGES)},
+            {"ic_chat", "লিডস", String.valueOf(S_LEADS)},
+        } : new String[][]{
+            {"ic_home", "হোম", String.valueOf(S_DASH)},
+            {"ic_grid", "সার্ভিস", String.valueOf(S_SERVICES)},
+            {"ic_list", "অর্ডার", String.valueOf(S_ORDERS)},
+            {"ic_calendar", "সাবস্ক্রিপশন", String.valueOf(S_MY_SUB)},
+            {"ic_wallet", "ওয়ালেট", String.valueOf(S_TOKENS)},
         };
         for (final String[] it : items) {
             final int target = Integer.parseInt(it[2]);
@@ -432,15 +464,17 @@ public class MainActivity extends Activity {
             boolean selected = screen == target
                 || (target == S_DASH && (screen == S_DASH))
                 || (target == S_LEADS && (screen == S_LEAD_DETAIL))
+                || (target == S_CUSTOMERS && (screen == S_CUSTOMER_DETAIL))
+                || (target == S_PAGES && (screen == S_PAGE_FORM))
                 || (target == S_ORDERS && (screen == S_ORDERS
                     || screen == S_ORDER_DETAIL || screen == S_ORDER_FORM
                     || screen == S_RECHARGE_FORM))
-                || (target == S_SUBS && (screen == S_MY_SUB || screen == S_TOKENS));
+                || (target == S_SERVICES && (screen == S_SERVICE_DETAIL))
+                || (target == S_MY_SUB && (screen == S_SUBS))
+                || (target == S_TOKENS && (screen == S_RECHARGE_FORM));
             if (selected) item.setBackground(rounded(SOFT_BLUE, 14));
             else item.setBackground(rippleBackground());
-            TextView icon = new TextView(this);
-            icon.setText(it[0]);
-            icon.setTextSize(18);
+            ImageView icon = iconView(iconRes(it[0]), selected ? PRIMARY : TEXT2);
             icon.setGravity(Gravity.CENTER);
             TextView label = new TextView(this);
             label.setText(it[1]);
@@ -482,11 +516,20 @@ public class MainActivity extends Activity {
         switch (screen) {
             case S_LOGIN: showLogin(); break;
             case S_PENDING: showPending(); break;
-            case S_DASH: showDashboard(); break;
+            case S_DASH:
+                // v7: admin dashboard and customer home are different
+                // admin dashboard and customer home are different screens.
+                if (signedIn && FirebaseAuthHelper.isAdmin()) showAdminDashboard();
+                else showDashboard();
+                break;
+            case S_CUSTOMERS: showCustomers(); break;
+            case S_CUSTOMER_DETAIL: showCustomerDetail(); break;
+            case S_PAGES: showPages(); break;
+            case S_PAGE_FORM: showPageForm(); break;
             case S_LEADS: showLeads(); break;
             // S_LEAD_DETAIL is handled before the switch in render()
             // (threadPane, not the main ScrollView) — never reaches here.
-            case S_CONNECT: showConnect(); break;
+            case S_CONNECT: showPages(); break; // v7: Connect lives in the admin Pages screen.
             case S_SERVICES: showServices(); break;
             case S_SERVICE_DETAIL: showServiceDetail(); break;
             case S_SUBS: showSubscriptions(); break;
@@ -502,6 +545,175 @@ public class MainActivity extends Activity {
     }
 
     // ---- Design helpers ----
+
+    // ---- v3: bundled Bengali font (Noto Sans Bengali in assets/fonts) ----
+    private Typeface bengaliRegular = null;
+    private Typeface bengaliBold = null;
+    private int v3AnimIndex = 0;
+    private Typeface bengaliTypeface(boolean bold) {
+        try {
+            if (bold) {
+                if (bengaliBold == null) bengaliBold = Typeface.createFromAsset(
+                    getAssets(), "fonts/NotoSansBengali-Bold.ttf");
+                return bengaliBold;
+            }
+            if (bengaliRegular == null) bengaliRegular = Typeface.createFromAsset(
+                getAssets(), "fonts/NotoSansBengali-Regular.ttf");
+            return bengaliRegular;
+        } catch (Exception e) { return bold ? Typeface.DEFAULT_BOLD : Typeface.DEFAULT; }
+    }
+
+    // ---- v3 animations: staggered fade + slide-up card entry (200-400ms) ----
+    private void animEntry(View v, int index) {
+        int delay = Math.min(index, 5) * 70;
+        v.setAlpha(0f);
+        v.setTranslationY(dp(16));
+        v.animate().alpha(1f).translationY(0).setDuration(350)
+            .setStartDelay(delay).start();
+    }
+
+    // ---- v3: button press scale .97, spring back on release ----
+    private void pressScale(final View v) {
+        v.setOnTouchListener(new View.OnTouchListener() {
+            @Override public boolean onTouch(View view, MotionEvent ev) {
+                if (ev.getAction() == MotionEvent.ACTION_DOWN) {
+                    view.setScaleX(0.97f); view.setScaleY(0.97f);
+                } else if (ev.getAction() == MotionEvent.ACTION_UP
+                        || ev.getAction() == MotionEvent.ACTION_CANCEL) {
+                    view.setScaleX(1f); view.setScaleY(1f);
+                }
+                return false;
+            }
+        });
+    }
+
+    // ---- v3: vector-drawable icon (24dp box, 22dp icon, tinted) ----
+    private ImageView iconView(int resId, int tint) {
+        ImageView iv = new ImageView(this);
+        if (resId != 0) iv.setImageResource(resId);
+        iv.setColorFilter(tint);
+        LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(dp(22), dp(22));
+        iv.setLayoutParams(lp);
+        return iv;
+    }
+    private int iconRes(String name) {
+        int id = getResources().getIdentifier(name, "drawable", getPackageName());
+        return id;
+    }
+
+    // ---- v3: glass card background (semi-transparent white + light border) ----
+    private GradientDrawable glassDrawable() {
+        GradientDrawable d = new GradientDrawable();
+        d.setColor(GLASS);
+        d.setCornerRadius(dp(20));
+        d.setStroke(dp(1), BORDER);
+        return d;
+    }
+
+    // ---- v3: gradient hero with slow colour shift (9-10s alternate) ----
+    private GradientDrawable heroShiftDrawable() {
+        final GradientDrawable d = new GradientDrawable(
+            GradientDrawable.Orientation.TL_BR, new int[]{PRIMARY, VIOLET});
+        d.setCornerRadius(dp(20));
+        final int[][] stops = {{PRIMARY, VIOLET}, {VIOLET, PINK}, {PRIMARY, VIOLET}};
+        ValueAnimator anim = ValueAnimator.ofFloat(0f, 2f);
+        anim.setDuration(9500);
+        anim.setRepeatMode(ValueAnimator.REVERSE);
+        anim.setRepeatCount(ValueAnimator.INFINITE);
+        final ArgbEvaluator ev = new ArgbEvaluator();
+        anim.addUpdateListener(new ValueAnimator.AnimatorUpdateListener() {
+            @Override public void onAnimationUpdate(ValueAnimator a) {
+                float f = (Float) a.getAnimatedValue();
+                int seg = Math.min(1, (int) f);
+                float t = f - seg;
+                int c1 = (Integer) ev.evaluate(t, stops[seg][0], stops[seg + 1][0]);
+                int c2 = (Integer) ev.evaluate(t, stops[seg][1], stops[seg + 1][1]);
+                d.setColors(new int[]{c1, c2});
+            }
+        });
+        anim.start();
+        return d;
+    }
+
+    // ---- v3: stepped progress (1 package -> 2 payment -> 3 verify) ----
+    private LinearLayout stepProgress(int current) {
+        String[] labels = {"প্যাকেজ", "পেমেন্ট", "যাচাই"};
+        LinearLayout row = new LinearLayout(this);
+        row.setOrientation(LinearLayout.HORIZONTAL);
+        row.setGravity(Gravity.CENTER_VERTICAL);
+        row.setPadding(0, 0, 0, dp(12));
+        for (int i = 0; i < 3; i++) {
+            TextView num = new TextView(this);
+            num.setText(bn(String.valueOf(i + 1)));
+            num.setTextSize(13);
+            num.setTypeface(Typeface.DEFAULT_BOLD);
+            num.setGravity(Gravity.CENTER);
+            num.setTextColor(i + 1 <= current ? Color.WHITE : TEXT2);
+            num.setBackground(rounded(i + 1 <= current ? PRIMARY : BORDER, 16));
+            LinearLayout.LayoutParams nlp = new LinearLayout.LayoutParams(dp(28), dp(28));
+            row.addView(num, nlp);
+            TextView lab = text(labels[i], 13, i + 1 <= current ? PRIMARY : TEXT2, i + 1 == current);
+            lab.setPadding(dp(6), 0, dp(14), 0);
+            row.addView(lab);
+        }
+        return row;
+    }
+
+    // ---- v3: horizontal quick-action row (icon tile + short label) ----
+    private LinearLayout quickAction(String iconName, String label, View.OnClickListener onClick) {
+        LinearLayout item = new LinearLayout(this);
+        item.setOrientation(LinearLayout.VERTICAL);
+        item.setGravity(Gravity.CENTER);
+        item.setPadding(dp(10), dp(10), dp(10), dp(10));
+        LinearLayout tile = new LinearLayout(this);
+        tile.setOrientation(LinearLayout.VERTICAL);
+        tile.setGravity(Gravity.CENTER);
+        tile.setBackground(gradient(PRIMARY, VIOLET));
+        LinearLayout.LayoutParams tlp = new LinearLayout.LayoutParams(dp(48), dp(48));
+        tile.setLayoutParams(tlp);
+        ImageView iv = iconView(iconRes(iconName), Color.WHITE);
+        tile.addView(iv);
+        item.addView(tile);
+        TextView lab = text(label, 12, TEXT, true);
+        lab.setGravity(Gravity.CENTER);
+        lab.setPadding(0, dp(6), 0, 0);
+        item.addView(lab);
+        item.setOnClickListener(onClick);
+        pressScale(item);
+        return item;
+    }
+
+    // ---- v3: timeline row (status dot + content) ----
+    private View statusDot(int color) {
+        View dot = new View(this);
+        dot.setBackground(rounded(color, 8));
+        LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(dp(12), dp(12));
+        lp.setMargins(0, dp(6), dp(10), 0);
+        dot.setLayoutParams(lp);
+        return dot;
+    }
+    private int statusColor(String status) {
+        if ("in_progress".equals(status)) return PRIMARY;
+        if ("completed".equals(status)) return GREEN;
+        if ("cancelled".equals(status) || "rejected".equals(status)) return RED;
+        return AMBER;
+    }
+
+    // ---- v3: shimmer loading  (alpha pulse, 1.4s) ----
+    private View shimmerBar() {
+        View v = new View(this);
+        v.setBackground(rounded(BORDER, 8));
+        LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(
+            ViewGroup.LayoutParams.MATCH_PARENT, dp(16));
+        lp.setMargins(0, 0, 0, dp(10));
+        v.setLayoutParams(lp);
+        ObjectAnimator a = ObjectAnimator.ofFloat(v, "alpha", 0.35f, 1f, 0.35f);
+        a.setDuration(1400);
+        a.setRepeatCount(ValueAnimator.INFINITE);
+        a.start();
+        return v;
+    }
+
     private int dp(int v) {
         return Math.round(v * getResources().getDisplayMetrics().density);
     }
@@ -533,15 +745,17 @@ public class MainActivity extends Activity {
         tv.setText(s);
         tv.setTextSize(size);
         tv.setTextColor(color);
-        if (bold) tv.setTypeface(Typeface.DEFAULT_BOLD);
+        tv.setTypeface(bengaliTypeface(bold));
+        if (size == 14) tv.setLineSpacing(0, 1.7f);
         return tv;
     }
 
     private LinearLayout card() {
         LinearLayout c = new LinearLayout(this);
         c.setOrientation(LinearLayout.VERTICAL);
-        c.setBackground(rounded(SURFACE, 20));
+        c.setBackground(glassDrawable());
         c.setElevation(dp(3));
+        animEntry(c, v3AnimIndex++);
         c.setPadding(dp(16), dp(16), dp(16), dp(16));
         LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(
             ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT);
@@ -557,7 +771,7 @@ public class MainActivity extends Activity {
     private TextView chip(String s, int bg, int fg) {
         TextView c = new TextView(this);
         c.setText(s);
-        c.setTextSize(12);
+        c.setTextSize(11);
         c.setTypeface(Typeface.DEFAULT_BOLD);
         c.setTextColor(fg);
         c.setBackground(rounded(bg, 20));
@@ -566,9 +780,9 @@ public class MainActivity extends Activity {
     }
 
     private TextView statusChip(LeadsStore.Lead lead) {
-        if (lead.paused) return chip("⏸ হ্যান্ডওভার", AMBER_SOFT, AMBER);
-        if ("bot_replied".equals(lead.status)) return chip("🤖 বট রিপ্লাই", GREEN_SOFT, GREEN);
-        return chip("🆕 নতুন", SOFT_BLUE, PRIMARY);
+        if (lead.paused) return chip(" হ্যান্ডওভার", AMBER_SOFT, AMBER);
+        if ("bot_replied".equals(lead.status)) return chip(" বট রিপ্লাই", GREEN_SOFT, GREEN);
+        return chip(" নতুন", SOFT_BLUE, PRIMARY);
     }
 
     private TextView primaryButton(String label, View.OnClickListener onClick) {
@@ -581,6 +795,7 @@ public class MainActivity extends Activity {
         b.setBackground(rounded(PRIMARY, 14));
         b.setPadding(dp(16), dp(13), dp(16), dp(13));
         b.setOnClickListener(onClick);
+        pressScale(b);
         LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(
             ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT);
         lp.setMargins(0, dp(6), 0, dp(6));
@@ -600,6 +815,7 @@ public class MainActivity extends Activity {
         b.setBackground(d);
         b.setPadding(dp(16), dp(12), dp(16), dp(12));
         b.setOnClickListener(onClick);
+        pressScale(b);
         LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(
             ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT);
         lp.setMargins(0, dp(6), 0, dp(6));
@@ -616,6 +832,7 @@ public class MainActivity extends Activity {
         b.setGravity(Gravity.CENTER);
         b.setPadding(dp(12), dp(10), dp(12), dp(10));
         b.setOnClickListener(onClick);
+        pressScale(b);
         return b;
     }
 
@@ -652,7 +869,7 @@ public class MainActivity extends Activity {
         }
     }
 
-    // Website payment number, exactly as shown in the website OrderModal
+    // Payment number, shown exactly as on the order form
     // ("bKash/Nagad (Personal)" + Copy button). Shown ONLY in the order
     // form and wallet recharge form below, where the customer must know
     // where to send money before filling senderPhone/trxId. This is the
@@ -672,7 +889,7 @@ public class MainActivity extends Activity {
         num.setPadding(0, dp(6), 0, dp(2));
         c.addView(num);
         c.addView(text("এই নম্বরে টাকা পাঠান, তারপর নিচে আপনার Sender নম্বর + TrxID লিখুন।", 13, TEXT2, false));
-        c.addView(outlineButton("📋 পেমেন্ট নম্বর কপি করুন", PRIMARY, new View.OnClickListener() {
+        c.addView(outlineButton(" পেমেন্ট নম্বর কপি করুন", PRIMARY, new View.OnClickListener() {
             @Override public void onClick(View v) { copyText("payment", PAYMENT_NUMBER); }
         }));
         return c;
@@ -715,6 +932,9 @@ public class MainActivity extends Activity {
         LinearLayout fill = new LinearLayout(this);
         fill.setBackground(rounded(PRIMARY, 8));
         bar.addView(fill, new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.MATCH_PARENT, p));
+        fill.setPivotX(0);
+        fill.setScaleX(0f);
+        ObjectAnimator.ofFloat(fill, "scaleX", 0f, 1f).setDuration(1000).start();
         LinearLayout rest = new LinearLayout(this);
         bar.addView(rest, new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.MATCH_PARENT, 100 - p));
         return bar;
@@ -732,7 +952,7 @@ public class MainActivity extends Activity {
         logo.setTypeface(Typeface.DEFAULT_BOLD);
         logo.setTextColor(Color.WHITE);
         logo.setGravity(Gravity.CENTER);
-        logo.setBackground(gradient(PRIMARY, VIOLET));
+        logo.setBackground(heroShiftDrawable());
         LinearLayout.LayoutParams llp = new LinearLayout.LayoutParams(dp(88), dp(88));
         llp.gravity = Gravity.CENTER;
         hero.addView(logo, llp);
@@ -764,7 +984,7 @@ public class MainActivity extends Activity {
             c.addView(err);
         }
         TextView google = new TextView(this);
-        google.setText("G   Continue with Google");
+        google.setText("Google দিয়ে চালিয়ে যান");
         google.setTextSize(16);
         google.setTypeface(Typeface.DEFAULT_BOLD);
         google.setTextColor(TEXT);
@@ -774,7 +994,7 @@ public class MainActivity extends Activity {
         google.setPadding(dp(16), dp(14), dp(16), dp(14));
         google.setOnClickListener(new View.OnClickListener() {
             @Override public void onClick(View v) {
-                // IN-APP LOGIN ONLY. No website redirect, ever, for login.
+                // IN-APP LOGIN ONLY. No app , ever, for login.
                 if (!FirebaseAuthHelper.isFirebaseReady(MainActivity.this)) {
                     go(S_PENDING, true);
                 } else {
@@ -784,16 +1004,9 @@ public class MainActivity extends Activity {
             }
         });
         c.addView(google);
-        TextView note = text("লগইন অ্যাপের ভিতরেই হবে — ওয়েবসাইটে যাবে না।", 13, TEXT2, false);
-        note.setGravity(Gravity.CENTER);
-        note.setPadding(0, dp(10), 0, 0);
-        c.addView(note);
         content.addView(c);
 
-        content.addView(ghostButton("ডেমো প্রিভিউ দেখুন (আসল ডাটা নয়)",
-            new View.OnClickListener() {
-                @Override public void onClick(View v) { enterDemoPreview(); }
-            }));
+        
         TextView about = text("অ্যাপ সম্পর্কে জানুন", 13, TEXT2, false);
         about.setGravity(Gravity.CENTER);
         about.setPadding(0, dp(8), 0, 0);
@@ -806,8 +1019,8 @@ public class MainActivity extends Activity {
     private void showPending() {
         LinearLayout c = card();
         c.setBackground(rounded(AMBER_SOFT, 20));
-        c.addView(text("⚠️ Firebase সেটআপ চলছে", 20, TEXT, true));
-        TextView body = text("Firebase setup pending — app registration in progress। এই Android অ্যাপটি Firebase-এ রেজিস্টার হওয়ার পর Google লগইন অ্যাপের ভিতরেই চালু হবে। ততক্ষণ লগইন ওয়েবসাইটে যাবে না, কারণ সেটাই আগের সমস্যা ছিল।", 15, TEXT, false);
+        c.addView(text("লগইন করা যাচ্ছে না", 20, TEXT, true));
+        TextView body = text("লগইন সেবাটি এখন চালু হচ্ছে না। কিছুক্ষণ পর আবার চেষ্টা করুন।", 15, TEXT, false);
         body.setPadding(0, dp(8), 0, dp(12));
         c.addView(body);
         content.addView(c);
@@ -816,48 +1029,47 @@ public class MainActivity extends Activity {
                 if (FirebaseAuthHelper.isFirebaseReady(MainActivity.this)) {
                     FirebaseAuthHelper.startGoogleSignIn(MainActivity.this);
                 } else {
-                    notice = "এখনো Firebase সেটআপ সম্পন্ন হয়নি। কিছুক্ষণ পর আবার চেষ্টা করুন।";
+                    notice = "এখনো লগইন চালু হয়নি। কিছুক্ষণ পর আবার চেষ্টা করুন।";
                     render();
                 }
             }
         }));
-        content.addView(outlineButton("ডেমো প্রিভিউ দেখুন (আসল ডাটা নয়)", PRIMARY,
-            new View.OnClickListener() {
-                @Override public void onClick(View v) { enterDemoPreview(); }
-            }));
-        content.addView(ghostButton("← লগইন স্ক্রিনে ফিরুন", new View.OnClickListener() {
+        
+        content.addView(ghostButton("লগইন স্ক্রিনে ফিরুন", new View.OnClickListener() {
             @Override public void onClick(View v) { go(S_LOGIN, false); }
         }));
     }
 
     // ---- Screens: Dashboard / Leads ----
     private void showDashboard() {
-        if (demoMode) {
-            content.addView(bannerCard("🧪 ডেমো প্রিভিউ — এগুলো আসল কাস্টমার বা আসল সাবস্ক্রিপশন নয়", AMBER_SOFT, AMBER));
-        } else if (signedIn) {
-            content.addView(bannerCard("● লাইভ মোড — ওয়েবসাইটের একই Firebase ডাটাবেস থেকে লিড আসছে", GREEN_SOFT, GREEN));
-        }
 
         LinearLayout hero = new LinearLayout(this);
         hero.setOrientation(LinearLayout.VERTICAL);
-        hero.setBackground(gradient(PRIMARY, VIOLET));
+        hero.setBackground(heroShiftDrawable());
         hero.setElevation(dp(2));
         hero.setPadding(dp(20), dp(20), dp(20), dp(20));
         LinearLayout.LayoutParams hlp = new LinearLayout.LayoutParams(
             ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT);
         hlp.setMargins(0, 0, 0, dp(14));
         hero.setLayoutParams(hlp);
-        String who = demoMode ? "ডেমো ব্যবহারকারী" : "স্বাগতম";
-        hero.addView(text(who, 24, Color.WHITE, true));
+        String who = "স্বাগতম";
+        hero.addView(text(who, 26, Color.WHITE, true));
         hero.addView(text("আজকের ড্যাশবোর্ড — লিড, হ্যান্ডওভার আর সাবস্ক্রিপশন এক নজরে", 14, Color.WHITE, false));
         content.addView(hero);
 
-        // Stat grid 2x2
+        // v7 CUSTOMER stat grid: the customer home shows the
+        // customer's OWN orders, never leads (leads live in the admin
+        // panel). Counts come from the already role-filtered list.
+        int pendingN = 0, doneN = 0;
+        for (OrderStore.Order o : orders) {
+            if ("pending".equals(o.status)) pendingN++;
+            if ("completed".equals(o.status)) doneN++;
+        }
         String[][] stats = {
-            {"💬", bn(String.valueOf(leadsStore.total())), "মোট লিড"},
-            {"⏸", bn(String.valueOf(leadsStore.handoverCount())), "হ্যান্ডওভার"},
-            {"🤖", bn(String.valueOf(leadsStore.botRepliedCount())), "বট রিপ্লাই"},
-            {"🆕", bn(String.valueOf(leadsStore.newCount())), "নতুন"},
+            {"ic_list", bn(String.valueOf(orders.size())), "মোট আমার অর্ডার"},
+            {"ic_clock", bn(String.valueOf(pendingN)), "অপেক্ষমাণ"},
+            {"ic_check", bn(String.valueOf(doneN)), "সম্পন্ন"},
+            {"ic_calendar", mySubscription == null ? "—" : bn(String.valueOf(mySubscription.daysRemaining())), "সাবস্ক্রিপশন দিন বাকি"},
         };
         for (int r = 0; r < 2; r++) {
             LinearLayout row = new LinearLayout(this);
@@ -873,14 +1085,18 @@ public class MainActivity extends Activity {
                     0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f);
                 slp.setMargins(k == 0 ? 0 : dp(7), 0, k == 0 ? dp(7) : 0, dp(14));
                 sc.setLayoutParams(slp);
-                sc.addView(text(st[0] + "  " + st[2], 13, TEXT2, false));
+                LinearLayout srow = new LinearLayout(this);
+                srow.setOrientation(LinearLayout.HORIZONTAL);
+                srow.setGravity(Gravity.CENTER_VERTICAL);
+                srow.addView(iconView(iconRes(st[0]), TEXT2));
+                TextView slab = text(st[2], 13, TEXT2, false);
+                slab.setPadding(dp(6), 0, 0, 0);
+                srow.addView(slab);
+                sc.addView(srow);
                 sc.addView(text(st[1], 26, NAVY, true));
-                final String filter = k == 0 && r == 0 ? "all"
-                    : (r == 0 ? "handover" : (k == 0 ? "bot_replied" : "new"));
                 sc.setOnClickListener(new View.OnClickListener() {
                     @Override public void onClick(View v) {
-                        currentFilter = filter;
-                        go(S_LEADS, true);
+                        go(S_ORDERS, true);
                     }
                 });
                 row.addView(sc);
@@ -891,7 +1107,8 @@ public class MainActivity extends Activity {
         // Subscription card
         if (mySubscription != null) {
             LinearLayout c = card();
-            c.addView(text("⭐ আমার সাবস্ক্রিপশন", 16, TEXT, true));
+            c.setBackground(heroShiftDrawable());
+            c.addView(text("আমার সাবস্ক্রিপশন", 16, Color.WHITE, true));
             TextView line = text(mySubscription.service + " • " + mySubscription.pkg
                 + " • " + mySubscription.price, 15, TEXT, false);
             line.setPadding(0, dp(6), 0, 0);
@@ -899,7 +1116,7 @@ public class MainActivity extends Activity {
             LinearLayout row2 = new LinearLayout(this);
             row2.setOrientation(LinearLayout.HORIZONTAL);
             row2.setPadding(0, dp(10), 0, 0);
-            TextView days = text(SubscriptionStore.daysRemainingBn(mySubscription), 22, PRIMARY, true);
+            TextView days = text(SubscriptionStore.daysRemainingBn(mySubscription), 22, Color.WHITE, true);
             row2.addView(days);
             LinearLayout.LayoutParams rp = new LinearLayout.LayoutParams(
                 0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f);
@@ -911,15 +1128,15 @@ public class MainActivity extends Activity {
             c.addView(row2);
             c.addView(progressBar(mySubscription.progressPercent()));
             TextView dates = text("শুরু: " + SubscriptionStore.formatDate(mySubscription.startMillis)
-                + "  •  শেষ: " + SubscriptionStore.formatDate(mySubscription.expiryMillis), 13, TEXT2, false);
+                + "  •  শেষ: " + SubscriptionStore.formatDate(mySubscription.expiryMillis), 13, Color.WHITE, false);
             c.addView(dates);
-            c.addView(ghostButton("সাবস্ক্রিপশন বিস্তারিত →", new View.OnClickListener() {
+            c.addView(outlineButton("সাবস্ক্রিপশন বিস্তারিত", Color.WHITE, new View.OnClickListener() {
                 @Override public void onClick(View v) { go(S_MY_SUB, true); }
             }));
             content.addView(c);
         } else {
             LinearLayout c = card();
-            c.addView(text("⭐ আমার সাবস্ক্রিপশন", 16, TEXT, true));
+            c.addView(text(" আমার সাবস্ক্রিপশন", 16, TEXT, true));
             TextView t2 = text("কোনো মাসিক সাবস্ক্রিপশন এখনো যুক্ত হয়নি। মাসিক প্যাকেজ কিনলে এখানে কত দিন বাকি আছে দেখা যাবে।", 14, TEXT2, false);
             t2.setPadding(0, dp(6), 0, 0);
             c.addView(t2);
@@ -929,56 +1146,99 @@ public class MainActivity extends Activity {
             content.addView(c);
         }
 
-        // Quick actions
-        LinearLayout qc = card();
-        qc.addView(text("দ্রুত কাজ", 16, TEXT, true));
-        qc.addView(outlineButton("💬 লিড দেখুন", PRIMARY, new View.OnClickListener() {
-            @Override public void onClick(View v) { go(S_LEADS, true); }
-        }));
-        qc.addView(outlineButton("🔗 ফেসবুক কানেক্ট", PRIMARY, new View.OnClickListener() {
-            @Override public void onClick(View v) { go(S_CONNECT, true); }
-        }));
-        qc.addView(outlineButton("🪙 টোকেন কিনুন", PRIMARY, new View.OnClickListener() {
-            @Override public void onClick(View v) { go(S_TOKENS, true); }
-        }));
-        qc.addView(outlineButton("📦 অর্ডার করুন (অ্যাপের ভিতরেই)", PRIMARY, new View.OnClickListener() {
+        // v3 CUSTOMER HOME: horizontal service scroll (gradient tiles).
+        content.addView(text("সার্ভিস", 18, NAVY, true));
+        HorizontalScrollView sscroll = new HorizontalScrollView(this);
+        sscroll.setHorizontalScrollBarEnabled(false);
+        LinearLayout srow = new LinearLayout(this);
+        srow.setOrientation(LinearLayout.HORIZONTAL);
+        for (final Service svc : SERVICES) {
+            LinearLayout tile = new LinearLayout(this);
+            tile.setOrientation(LinearLayout.VERTICAL);
+            tile.setGravity(Gravity.CENTER);
+            tile.setBackground(gradient(PRIMARY, VIOLET));
+            tile.setPadding(dp(16), dp(16), dp(16), dp(16));
+            LinearLayout.LayoutParams tlp = new LinearLayout.LayoutParams(dp(150), dp(110));
+            tlp.setMargins(0, 0, dp(10), dp(14));
+            tile.setLayoutParams(tlp);
+            tile.addView(iconView(iconRes(svc.icon), Color.WHITE));
+            TextView tn = text(svc.name, 14, Color.WHITE, true);
+            tn.setGravity(Gravity.CENTER);
+            tn.setPadding(0, dp(8), 0, 0);
+            tile.addView(tn);
+            tile.setOnClickListener(new View.OnClickListener() {
+                @Override public void onClick(View v) { currentService = svc; go(S_SERVICE_DETAIL, true); }
+            });
+            pressScale(tile);
+            srow.addView(tile);
+        }
+        sscroll.addView(srow);
+        content.addView(sscroll);
+        content.addView(primaryButton("নতুন অর্ডার করুন", new View.OnClickListener() {
             @Override public void onClick(View v) { selectedPackage = null; go(S_ORDER_FORM, true); }
         }));
-        qc.addView(outlineButton("📦 আমার অর্ডার দেখুন", PRIMARY, new View.OnClickListener() {
+
+        // CUSTOMER quick actions: no leads, no connect — those
+        // live in the admin panel.
+        LinearLayout qc = card();
+        qc.addView(text("দ্রুত কাজ", 16, TEXT, true));
+        qc.addView(outlineButton(" সার্ভিস দেখুন", PRIMARY, new View.OnClickListener() {
+            @Override public void onClick(View v) { go(S_SERVICES, true); }
+        }));
+        qc.addView(outlineButton(" অর্ডার করুন", PRIMARY, new View.OnClickListener() {
+            @Override public void onClick(View v) { selectedPackage = null; go(S_ORDER_FORM, true); }
+        }));
+        qc.addView(outlineButton(" আমার অর্ডার দেখুন", PRIMARY, new View.OnClickListener() {
             @Override public void onClick(View v) { go(S_ORDERS, true); }
         }));
+        qc.addView(outlineButton(" আমার সাবস্ক্রিপশন দেখুন", PRIMARY, new View.OnClickListener() {
+            @Override public void onClick(View v) { go(S_MY_SUB, true); }
+        }));
+        qc.addView(outlineButton(" টোকেন কিনুন", PRIMARY, new View.OnClickListener() {
+            @Override public void onClick(View v) { go(S_TOKENS, true); }
+        }));
+        
         content.addView(qc);
 
-        // Recent leads
+        // v7 CUSTOMER recent: own orders, never leads.
         LinearLayout recent = card();
-        recent.addView(text("সাম্প্রতিক লিড", 16, TEXT, true));
-        if (leadsLoading) {
+        recent.addView(text("সাম্প্রতিক আমার অর্ডার", 16, TEXT, true));
+        if (ordersLoading) {
             TextView l = text("লোড হচ্ছে…", 14, TEXT2, false);
             l.setPadding(0, dp(8), 0, 0);
             recent.addView(l);
-        } else if (leadsError != null) {
-            TextView l = text(leadsError, 14, RED, true);
+        } else if (ordersError != null) {
+            TextView l = text(ordersError, 14, RED, true);
             l.setPadding(0, dp(8), 0, 0);
             recent.addView(l);
             recent.addView(primaryButton("আবার চেষ্টা করুন", new View.OnClickListener() {
-                @Override public void onClick(View v) { loadLiveLeads(); render(); }
+                @Override public void onClick(View v) { loadLiveOrders(); render(); }
             }));
-        } else if (leadsStore.all().isEmpty()) {
-            TextView l = text("এখনো কোনো লিড নেই। কেউ আপনার পেজে মেসেজ করলে এখানে লিড দেখা যাবে।", 14, TEXT2, false);
+        } else if (orders.isEmpty()) {
+            TextView l = text("এখনো কোনো অর্ডার নেই। নতুন অর্ডার করলে এখানে দেখা যাবে।", 14, TEXT2, false);
             l.setPadding(0, dp(8), 0, 0);
             recent.addView(l);
-            recent.addView(outlineButton("লিড রিফ্রেশ করুন", PRIMARY, new View.OnClickListener() {
-                @Override public void onClick(View v) {
-                    if (demoMode) render(); else loadLiveLeads();
-                }
-            }));
         } else {
-            List<LeadsStore.Lead> all = leadsStore.all();
-            for (int i = 0; i < Math.min(3, all.size()); i++) {
-                recent.addView(leadRow(all.get(i)));
+            for (int i = 0; i < Math.min(3, orders.size()); i++) {
+                final OrderStore.Order ro = orders.get(i);
+                LinearLayout rrow = new LinearLayout(this);
+                rrow.setOrientation(LinearLayout.HORIZONTAL);
+                rrow.setGravity(Gravity.CENTER_VERTICAL);
+                rrow.setPadding(0, dp(8), 0, dp(8));
+                TextView rnm = text(ro.serviceName + " • " + ro.amount, 15, TEXT, true);
+                LinearLayout.LayoutParams rmp = new LinearLayout.LayoutParams(
+                    0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f);
+                rrow.addView(rnm, rmp);
+                rrow.addView(orderStatusChip(ro));
+                rrow.setBackground(rippleBackground());
+                rrow.setClickable(true);
+                rrow.setOnClickListener(new View.OnClickListener() {
+                    @Override public void onClick(View v) { currentOrder = ro; go(S_ORDER_DETAIL, true); }
+                });
+                recent.addView(rrow);
             }
-            recent.addView(ghostButton("সব লিড দেখুন →", new View.OnClickListener() {
-                @Override public void onClick(View v) { currentFilter = "all"; go(S_LEADS, true); }
+            recent.addView(ghostButton("সব অর্ডার দেখুন", new View.OnClickListener() {
+                @Override public void onClick(View v) { go(S_ORDERS, true); }
             }));
         }
         content.addView(recent);
@@ -1016,13 +1276,10 @@ public class MainActivity extends Activity {
     }
 
     private void showLeads() {
-        content.addView(text("Messenger Leads", 24, NAVY, true));
+        content.addView(text("Messenger Leads", 26, NAVY, true));
         TextView count = text("মোট " + bn(String.valueOf(leadsStore.total())) + "টি লিড", 14, TEXT2, false);
         count.setPadding(0, dp(4), 0, dp(12));
         content.addView(count);
-        if (demoMode) {
-            content.addView(bannerCard("🧪 ডেমো প্রিভিউ — এগুলো আসল কাস্টমার নয়", AMBER_SOFT, AMBER));
-        }
         // Filter chips (actually filter)
         String[][] filters = {
             {"all", "সব"}, {"handover", "হ্যান্ডওভার"},
@@ -1084,15 +1341,15 @@ public class MainActivity extends Activity {
                 content.addView(c);
             }
             LinearLayout foot = card();
-            foot.addView(outlineButton("📋 সব লিডের সারাংশ কপি করুন", PRIMARY,
+            foot.addView(outlineButton(" সব লিডের সারাংশ কপি করুন", PRIMARY,
                 new View.OnClickListener() {
                     @Override public void onClick(View v) {
                         copyText("leads", leadsStore.copyAllLeadsSummary());
                     }
                 }));
-            foot.addView(outlineButton("🔄 লিড রিফ্রেশ করুন", PRIMARY, new View.OnClickListener() {
+            foot.addView(outlineButton(" লিড রিফ্রেশ করুন", PRIMARY, new View.OnClickListener() {
                 @Override public void onClick(View v) {
-                    if (demoMode) render(); else loadLiveLeads();
+                    loadLiveLeads();
                 }
             }));
             content.addView(foot);
@@ -1131,7 +1388,7 @@ public class MainActivity extends Activity {
         topRow.setOrientation(LinearLayout.HORIZONTAL);
         topRow.setGravity(Gravity.CENTER_VERTICAL);
         TextView back = new TextView(this);
-        back.setText("← ফিরুন");
+        back.setText("ফিরুন");
         back.setTextSize(14);
         back.setTypeface(Typeface.DEFAULT_BOLD);
         back.setTextColor(PRIMARY);
@@ -1162,20 +1419,20 @@ public class MainActivity extends Activity {
         head.addView(hrow);
         // Take Over / Resume AI lives in the header so the state is visible
         // the moment the thread opens — no scrolling needed to find it.
-        head.addView(outlineButton(lead.paused ? "▶ Resume AI (বট আবার চালু করুন)"
-                : "⏸ Take Over (বট থামিয়ে নিজে উত্তর দিন)",
+        head.addView(outlineButton(lead.paused ? " Resume AI (বট আবার চালু করুন)"
+                : " Take Over (বট থামিয়ে নিজে উত্তর দিন)",
             lead.paused ? GREEN : AMBER, new View.OnClickListener() {
                 @Override public void onClick(View v) {
                     toggleLeadPause(lead);
                 }
             }));
-        head.addView(ghostButton("📋 লিড ডিটেইলস কপি করুন",
+        head.addView(ghostButton(" লিড ডিটেইলস কপি করুন",
             new View.OnClickListener() {
                 @Override public void onClick(View v) {
                     copyText("lead", leadsStore.copyLeadDetails(lead));
                 }
             }));
-        head.addView(ghostButton("🔄 রিফ্রেশ (সার্ভার থেকে আবার আনুন)",
+        head.addView(ghostButton(" রিফ্রেশ করুন",
             new View.OnClickListener() {
                 @Override public void onClick(View v) {
                     refreshThread(lead);
@@ -1225,19 +1482,19 @@ public class MainActivity extends Activity {
             // Historic owner messages (sendStatus empty) show nothing.
             if (isOwner && m.sendStatus != null && m.sendStatus.length() > 0) {
                 if ("sending".equals(m.sendStatus)) {
-                    TextView st = text("⏳ পাঠানো হচ্ছে…", 12, TEXT2, true);
+                    TextView st = text(" পাঠানো হচ্ছে…", 12, TEXT2, true);
                     st.setGravity(Gravity.END);
                     wrap.addView(st);
                 } else if ("sent".equals(m.sendStatus)) {
-                    TextView st = text("✓ Messenger-এ পাঠানো হয়েছে", 12, GREEN, true);
+                    TextView st = text(" Messenger-এ পাঠানো হয়েছে", 12, GREEN, true);
                     st.setGravity(Gravity.END);
                     wrap.addView(st);
                 } else if ("sent_pending_save".equals(m.sendStatus)) {
-                    TextView st = text("✓ Messenger-এ পাঠানো হয়েছে • চ্যাট হিস্ট্রিতে সেভ হচ্ছে…", 12, AMBER, true);
+                    TextView st = text(" Messenger-এ পাঠানো হয়েছে • ", 12, AMBER, true);
                     st.setGravity(Gravity.END);
                     wrap.addView(st);
                 } else if ("failed".equals(m.sendStatus)) {
-                    TextView st = text("✗ পাঠানো যায়নি — আবার চেষ্টা করুন", 12, RED, true);
+                    TextView st = text("পাঠানো যায়নি — আবার চেষ্টা করুন", 12, RED, true);
                     st.setGravity(Gravity.END);
                     wrap.addView(st);
                     wrap.addView(ghostButton("↻ এই মেসেজ আবার পাঠান",
@@ -1263,7 +1520,7 @@ public class MainActivity extends Activity {
         comp.setBackgroundColor(SURFACE);
         comp.setElevation(dp(8));
         comp.setPadding(dp(16), dp(12), dp(16), dp(12));
-        TextView info = text("এখানে লিখলে মেসেজ সরাসরি কাস্টমারের Messenger-এ যাবে (সার্ভারের মাধ্যমে)। "
+        TextView info = text("এখানে লিখলে মেসেজ সরাসরি কাস্টমারের Messenger-এ যাবে। "
             + "লেখার সাথে সাথে এই লিডের বট থেমে যাবে — বট আবার চালু করতে উপরের Resume AI চাপুন।",
             13, TEXT2, false);
         info.setPadding(0, 0, 0, dp(8));
@@ -1282,7 +1539,7 @@ public class MainActivity extends Activity {
             0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f);
         row.addView(threadInput, ip);
         TextView send = new TextView(this);
-        send.setText("পাঠান ➤");
+        send.setText("পাঠান");
         send.setTextSize(15);
         send.setTypeface(Typeface.DEFAULT_BOLD);
         send.setTextColor(Color.WHITE);
@@ -1314,13 +1571,13 @@ public class MainActivity extends Activity {
     // v5 SEND FLOW: message appears at the bottom IMMEDIATELY as "sending",
     // then flips to sent/failed. Sending ALSO auto-pauses the bot, so the
     // bot cannot answer the same customer twice.
-    // v6 SEND FLOW + CHAT REFRESH FIX: the Render server is the
-    // SINGLE WRITER of the owner message into Firestore (see the bot
-    // server change). The app never writes the owner message itself —
+    // v6 SEND FLOW + CHAT REFRESH FIX: the reply endpoint service is the
+    // SINGLE WRITER of the owner message into database (see the bot
+    // service change). The app never writes the owner message itself —
     // that would duplicate it. After a successful send the app RELOADS
-    // the lead doc from Firestore and displays the reloaded thread, so
+    // the lead doc from database and displays the reloaded thread, so
     // Refresh and re-open show exactly what Messenger shows. If the
-    // server has not deployed the history-write yet (saved=false),
+    // service has not deployed the history-write yet (saved=false),
     // the message stays visible locally with an honest
     // "saving to chat history…" status instead of silently pretending
     // a locally-only message is saved.
@@ -1328,9 +1585,9 @@ public class MainActivity extends Activity {
         final LeadsStore.Message m = leadsStore.addSendingOwnerMessage(lead, msg);
         if (threadInput != null) threadInput.setText("");
         renderThreadScreen();
-        if (demoMode || FirebaseAuthHelper.currentUid() == null) {
-            m.sendStatus = "sent";
-            Toast.makeText(this, "ডেমো রিপ্লাই যোগ হয়েছে (লাইভে যায়নি)।", Toast.LENGTH_SHORT).show();
+        if (FirebaseAuthHelper.currentUid() == null) {
+            m.sendStatus = "failed";
+            Toast.makeText(this, "লগইন করা নেই। আবার লগইন করুন।", Toast.LENGTH_SHORT).show();
             renderThreadScreen();
             return;
         }
@@ -1338,19 +1595,19 @@ public class MainActivity extends Activity {
             new FirebaseAuthHelper.ResultCallback<FirebaseAuthHelper.ReplyOutcome>() {
                 @Override public void onSuccess(FirebaseAuthHelper.ReplyOutcome outcome) {
                     if (!outcome.saved) {
-                        // Old server: Messenger got it, history did not.
+                        // Old service: Messenger got it, history did not.
                         m.sendStatus = "sent_pending_save";
                         FirebaseAuthHelper.updateLeadStatus(lead, true, "handover",
                             new FirebaseAuthHelper.ResultCallback<Boolean>() {
                                 @Override public void onSuccess(Boolean o) { }
                                 @Override public void onError(String e) { }
                             });
-                        notice = "Messenger-এ পাঠানো হয়েছে, কিন্তু সার্ভারের পুরনো ভার্সন চ্যাট হিস্ট্রি সেভ করেনি — সার্ভার আপডেট ডেপ্লয় হলে রিফ্রেশে দেখা যাবে।";
+                        notice = "Messenger-এ পাঠানো হয়েছে।";
                         renderThreadScreen();
                         return;
                     }
-                    // Server saved it: pause, then reload the doc so the
-                    // thread on screen IS the server-saved thread.
+                    // Service saved it: pause, then reload the doc so the
+                    // thread on screen IS the service-saved thread.
                     FirebaseAuthHelper.updateLeadStatus(lead, true, "handover",
                         new FirebaseAuthHelper.ResultCallback<Boolean>() {
                             @Override public void onSuccess(Boolean o) { reloadLeadIntoThread(lead); }
@@ -1367,8 +1624,8 @@ public class MainActivity extends Activity {
     private void resendThreadMessage(final LeadsStore.Lead lead, final LeadsStore.Message m) {
         m.sendStatus = "sending";
         renderThreadScreen();
-        if (demoMode || FirebaseAuthHelper.currentUid() == null) {
-            m.sendStatus = "sent";
+        if (FirebaseAuthHelper.currentUid() == null) {
+            m.sendStatus = "failed";
             renderThreadScreen();
             return;
         }
@@ -1393,10 +1650,10 @@ public class MainActivity extends Activity {
             });
     }
 
-    /** Reload ONE lead doc from Firestore and swap it into the list
+    /** Reload ONE lead doc from the database and swap it into the list
      *  and the open thread. This is what makes Refresh truthful. */
     private void reloadLeadIntoThread(final LeadsStore.Lead lead) {
-        if (demoMode || FirebaseAuthHelper.currentUid() == null) {
+        if (FirebaseAuthHelper.currentUid() == null) {
             renderThreadScreen();
             return;
         }
@@ -1421,11 +1678,11 @@ public class MainActivity extends Activity {
             });
     }
 
-    /** Thread Refresh button: reload from Firestore, honestly. If the
-     *  just-sent message is missing, the server history-write has not
+    /** Thread Refresh button: reload from the database. If the
+     *  just-sent message is missing, the service history-write has not
      *  deployed yet — say so, instead of showing a stale thread. */
     private void refreshThread(final LeadsStore.Lead lead) {
-        if (demoMode || FirebaseAuthHelper.currentUid() == null) {
+        if (FirebaseAuthHelper.currentUid() == null) {
             renderThreadScreen();
             return;
         }
@@ -1442,7 +1699,7 @@ public class MainActivity extends Activity {
                     }
                     currentLead = reloaded;
                     if (reloaded.messages.size() < beforeCount) {
-                        notice = "রিফ্রেশে নতুন মেসেজ দেখা যাচ্ছে না — সার্ভারের হিস্ট্রি-সেভ আপডেট এখনো ডেপ্লয় হয়নি হতে পারে। Messenger-এ মেসেজটি ঠিকই পাঠানো হয়েছে।";
+                        notice = "নতুন মেসেজ দেখা যাচ্ছে না — আবার চেষ্টা করুন। Messenger-এ মেসেজটি পাঠানো হয়েছে।";
                     } else {
                         Toast.makeText(MainActivity.this, "রিফ্রেশ হয়েছে।", Toast.LENGTH_SHORT).show();
                     }
@@ -1455,7 +1712,7 @@ public class MainActivity extends Activity {
             });
     }
 
-    // ---- v6: ORDERS (in-app, same Firestore 'orders' as website) ----
+    // ---- v6: ORDERS (in-app, same database 'orders' as app) ----
 
     private OrderStore.OrderPackage findMonthlyPackage(String service, String pkgLabel) {
         for (OrderStore.OrderPackage p : OrderStore.PACKAGES) {
@@ -1469,7 +1726,9 @@ public class MainActivity extends Activity {
     }
 
     private void deriveMySubscription() {
-        if (demoMode) return;
+                // v7: admins have no My Subscription — never derive one for
+        // the admin account from the all-orders list.
+        if (FirebaseAuthHelper.isAdmin()) { mySubscription = null; mySubscriptionOrderStatus = ""; return; }
         SubscriptionStore.Subscription derived =
             OrderStore.subscriptionFromOrders(orders);
         mySubscription = derived;
@@ -1493,16 +1752,9 @@ public class MainActivity extends Activity {
             ordersLoading = false;
             return;
         }
-        if (demoMode) {
-            orders = OrderStore.demoOrders();
-            ordersLoaded = true;
-            ordersLoading = false;
-            ordersError = null;
-            deriveMySubscription();
-            return;
-        }
         ordersLoading = true;
         ordersError = null;
+        autoExpireRunForLoad = false;
         final boolean admin = FirebaseAuthHelper.isAdmin();
         FirebaseAuthHelper.fetchOrders(uid, admin,
             new FirebaseAuthHelper.ResultCallback<List<OrderStore.Order>>() {
@@ -1512,6 +1764,9 @@ public class MainActivity extends Activity {
                     ordersLoading = false;
                     ordersError = null;
                     deriveMySubscription();
+                    // v7 AUTO-EXPIRE (admin only, once per load): monthly
+                    // orders past expiry are auto-cancelled in database.
+                    if (FirebaseAuthHelper.isAdmin()) runAutoExpire();
                     if (screen == S_DASH || screen == S_ORDERS || screen == S_MY_SUB) render();
                 }
                 @Override public void onError(String message) {
@@ -1523,29 +1778,34 @@ public class MainActivity extends Activity {
     }
 
     private TextView orderStatusChip(OrderStore.Order o) {
-        if ("in_progress".equals(o.status)) return chip("▶ চলমান", SOFT_BLUE, PRIMARY);
-        if ("completed".equals(o.status)) return chip("✓ সম্পন্ন", GREEN_SOFT, GREEN);
-        if ("cancelled".equals(o.status) || "rejected".equals(o.status)) return chip("✕ বাতিল", RED_SOFT, RED);
-        return chip("⏳ অপেক্ষমাণ", AMBER_SOFT, AMBER);
+        if ("in_progress".equals(o.status)) return chip(" চলমান", SOFT_BLUE, PRIMARY);
+        if ("completed".equals(o.status)) return chip(" সম্পন্ন", GREEN_SOFT, GREEN);
+        if ("cancelled".equals(o.status) || "rejected".equals(o.status)) return chip(" বাতিল", RED_SOFT, RED);
+        return chip(" অপেক্ষমাণ", AMBER_SOFT, AMBER);
     }
 
     private void showOrders() {
-        content.addView(text("অর্ডার", 24, NAVY, true));
-        final boolean admin = !demoMode && FirebaseAuthHelper.isAdmin();
-        if (demoMode) {
-            content.addView(bannerCard("🧪 ডেমো প্রিভিউ — এগুলো আসল অর্ডার নয়", AMBER_SOFT, AMBER));
-        } else if (admin) {
-            content.addView(bannerCard("অ্যাডমিন মোড — সব কাস্টমারের অর্ডার দেখা যাচ্ছে। স্ট্যাটাস শুধু অ্যাডমিন বদলাতে পারবেন।", GREEN_SOFT, GREEN));
+        content.addView(text("অর্ডার", 26, NAVY, true));
+        final boolean admin = FirebaseAuthHelper.isAdmin();
+        if (admin) {
+            content.addView(bannerCard("অ্যাডমিন প্যানেল — সব কাস্টমারের অর্ডার। এখানে অর্ডার ম্যানেজ করা হয়: স্ট্যাটাস বদলানো, বাতিল করা, অ্যাডমিন মেসেজ। অ্যাডমিন এখান থেকে নিজের জন্য অর্ডার করবেন না।", GREEN_SOFT, GREEN));
+            if (autoExpireCount > 0) {
+                content.addView(bannerCard(" " + bn(String.valueOf(autoExpireCount)) + "টি মাসিক অর্ডারের অফার শেষ হয়েছে — স্বয়ংক্রিয়ভাবে বাতিল করা হয়েছে। বাতিল অর্ডারগুলো তালিকায় দেখা যাবে, মুছে ফেলা হয়নি।", AMBER_SOFT, AMBER));
+            }
             LinearLayout ruleNote = card();
             ruleNote.setBackground(rounded(AMBER_SOFT, 20));
-            ruleNote.addView(text("অন্য কাস্টমারের অ্যাকাউন্টে সাবস্ক্রিপশন যোগ করা: এখনো চালু হয়নি — Firestore rules-এ orders create-এ অ্যাডমিন অনুমতি যোগ করতে হবে (আলাদা পেন্ডিং টাস্ক)। এখন অ্যাডমিন শুধু নিজের অ্যাকাউন্টের অর্ডার তৈরি করতে পারবেন; অন্যের userId দিয়ে তৈরি করলে rules বাধা দেবে।", 13, TEXT, false));
+            ruleNote.addView(text("অন্য কাস্টমারের অ্যাকাউন্টে নতুন অর্ডার/সাবস্ক্রিপশন তৈরি করা এখনো চালু হয়নি। অ্যাডমিন এখানে অর্ডার ম্যানেজ করবেন, তৈরি করবেন না।", 13, TEXT, false));
             content.addView(ruleNote);
         } else {
             content.addView(bannerCard("শুধু আপনার নিজের অর্ডার দেখা যাচ্ছে। অন্যের অর্ডার এখানে দেখানো হয় না।", SOFT_BLUE, PRIMARY));
         }
-        content.addView(primaryButton("＋ নতুন অর্ডার করুন (অ্যাপের ভিতরেই)", new View.OnClickListener() {
-            @Override public void onClick(View v) { selectedPackage = null; go(S_ORDER_FORM, true); }
-        }));
+        // v7: the order form belongs to customers only. Admins
+        // manage orders here; they never place orders for themselves.
+        if (!admin) {
+            content.addView(primaryButton("＋ নতুন অর্ডার করুন", new View.OnClickListener() {
+                @Override public void onClick(View v) { selectedPackage = null; go(S_ORDER_FORM, true); }
+            }));
+        }
         // Status filter chips
         LinearLayout filters = card();
         filters.addView(text("ফিল্টার", 15, TEXT, true));
@@ -1557,7 +1817,7 @@ public class MainActivity extends Activity {
             row.setOrientation(LinearLayout.HORIZONTAL);
             row.setGravity(Gravity.CENTER_VERTICAL);
             row.setPadding(0, dp(4), 0, dp(4));
-            TextView lbl = text((orderFilter.equals(key) ? "● " : "○ ") + f[1], 15,
+            TextView lbl = text((orderFilter.equals(key) ? " " : "○ ") + f[1], 15,
                 orderFilter.equals(key) ? PRIMARY : TEXT, orderFilter.equals(key));
             row.addView(lbl);
             row.setBackground(rippleBackground());
@@ -1569,6 +1829,9 @@ public class MainActivity extends Activity {
         }
         content.addView(filters);
         if (ordersLoading) {
+            content.addView(shimmerBar());
+            content.addView(shimmerBar());
+            content.addView(shimmerBar());
             content.addView(text("লোড হচ্ছে…", 14, TEXT2, false));
             return;
         }
@@ -1585,15 +1848,38 @@ public class MainActivity extends Activity {
         }
         if (shown.isEmpty()) {
             LinearLayout c = card();
-            c.addView(text("এখনো কোনো অর্ডার নেই", 17, TEXT, true));
+            c.addView(text("এখনো কোনো অর্ডার নেই", 16, TEXT, true));
             TextView t = text("নতুন অর্ডার করলে এখানে দেখা যাবে — স্ট্যাটাস Pending থেকে শুরু হবে, অ্যাডমিন অনুমোদন দিলে চলমান হবে।", 14, TEXT2, false);
             t.setPadding(0, dp(6), 0, 0);
             c.addView(t);
             content.addView(c);
             return;
         }
-        for (final OrderStore.Order o : shown) {
+        // v3: date-grouped timeline — today / last 7 days / earlier.
+        java.util.LinkedHashMap<String, java.util.List<OrderStore.Order>> groups =
+            new java.util.LinkedHashMap<String, java.util.List<OrderStore.Order>>();
+        long nowMs = System.currentTimeMillis();
+        for (OrderStore.Order go : shown) {
+            long age = nowMs - go.dateMillis;
+            String bucket = (go.dateMillis <= 0 || age < 0) ? "আগে"
+                : (age < 24L * 60 * 60 * 1000) ? "আজ"
+                : (age < 7L * 24 * 60 * 60 * 1000) ? "গত ৭ দিন" : "আগে";
+            if (!groups.containsKey(bucket)) groups.put(bucket, new java.util.ArrayList<OrderStore.Order>());
+            groups.get(bucket).add(go);
+        }
+        for (java.util.Map.Entry<String, java.util.List<OrderStore.Order>> grp : groups.entrySet()) {
+        TextView ghead = text(grp.getKey(), 18, NAVY, true);
+        ghead.setPadding(0, dp(6), 0, dp(8));
+        content.addView(ghead);
+        for (final OrderStore.Order o : grp.getValue()) {
             LinearLayout row = card();
+            LinearLayout dotRow = new LinearLayout(this);
+            dotRow.setOrientation(LinearLayout.HORIZONTAL);
+            dotRow.setGravity(Gravity.CENTER_VERTICAL);
+            dotRow.addView(statusDot(statusColor(o.status)));
+            TextView dotLab = text(o.dateMillis > 0 ? SubscriptionStore.formatDate(o.dateMillis) : "", 13, TEXT2, false);
+            dotRow.addView(dotLab);
+            row.addView(dotRow);
             LinearLayout top = new LinearLayout(this);
             top.setOrientation(LinearLayout.HORIZONTAL);
             top.setGravity(Gravity.CENTER_VERTICAL);
@@ -1608,8 +1894,12 @@ public class MainActivity extends Activity {
             if (o.isMonthly()) {
                 SubscriptionStore.Subscription sub = SubscriptionStore.fromOrder(
                     o.serviceName, o.packageDetails, o.amount, o.dateMillis, 1);
-                row.addView(text("সাবস্ক্রিপশন: " + SubscriptionStore.daysRemainingBn(sub)
-                    + "  •  শেষ: " + SubscriptionStore.formatDate(sub.expiryMillis), 13, PRIMARY, true));
+                if (monthlyExpired(o) && !"cancelled".equals(o.status)) {
+                    row.addView(text(" মেয়াদ শেষ — স্বয়ংক্রিয়ভাবে বন্ধ", 13, RED, true));
+                } else {
+                    row.addView(text("সাবস্ক্রিপশন: " + SubscriptionStore.daysRemainingBn(sub)
+                        + "  •  শেষ: " + SubscriptionStore.formatDate(sub.expiryMillis), 13, PRIMARY, true));
+                }
             }
             row.setBackground(rippleBackground());
             row.setClickable(true);
@@ -1618,9 +1908,10 @@ public class MainActivity extends Activity {
             });
             content.addView(row);
         }
-        content.addView(outlineButton("🔄 অর্ডার রিফ্রেশ করুন", PRIMARY, new View.OnClickListener() {
+        }
+        content.addView(outlineButton(" অর্ডার রিফ্রেশ করুন", PRIMARY, new View.OnClickListener() {
             @Override public void onClick(View v) {
-                if (demoMode) render(); else loadLiveOrders();
+                loadLiveOrders();
             }
         }));
     }
@@ -1628,21 +1919,22 @@ public class MainActivity extends Activity {
     private void showOrderDetail() {
         final OrderStore.Order o = currentOrder;
         if (o == null) { go(S_ORDERS, false); return; }
-        content.addView(ghostButton("← অর্ডারে ফিরুন", new View.OnClickListener() {
+        content.addView(ghostButton("অর্ডারে ফিরুন", new View.OnClickListener() {
             @Override public void onClick(View v) { go(S_ORDERS, false); }
         }));
         LinearLayout c = card();
+        c.setBackground(heroShiftDrawable());
         LinearLayout top = new LinearLayout(this);
         top.setOrientation(LinearLayout.HORIZONTAL);
         top.setGravity(Gravity.CENTER_VERTICAL);
-        TextView nm = text(o.serviceName, 20, NAVY, true);
+        TextView nm = text(o.serviceName, 20, Color.WHITE, true);
         LinearLayout.LayoutParams mp = new LinearLayout.LayoutParams(
             0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f);
         top.addView(nm, mp);
         top.addView(orderStatusChip(o));
         c.addView(top);
-        c.addView(text(o.packageDetails + "  •  " + o.amount, 16, TEXT, false));
-        c.addView(text("কাস্টমার: " + o.userName, 14, TEXT, false));
+        c.addView(text(o.packageDetails + "  •  " + o.amount, 22, Color.WHITE, true));
+        c.addView(text("কাস্টমার: " + o.userName, 14, Color.WHITE, false));
         c.addView(text("পেমেন্ট: " + o.paymentMethod + "  •  Sender: " + o.senderPhone, 14, TEXT, false));
         c.addView(text("TrxID: " + o.trxId, 14, TEXT, false));
         if (o.clientPageLink != null && o.clientPageLink.length() > 0)
@@ -1654,11 +1946,18 @@ public class MainActivity extends Activity {
         if (o.completionDate != null && o.completionDate.length() > 0)
             c.addView(text("সম্পন্ন: " + o.completionDate, 14, TEXT2, false));
         content.addView(c);
+        if (o.isMonthly() && monthlyExpired(o)) {
+            LinearLayout ec = card();
+            ec.setBackground(rounded(RED_SOFT, 20));
+            ec.addView(text(" অফার শেষ — এই মাসিক অর্ডারের মেয়াদ শেষ হয়েছে।", 15, RED, true));
+            ec.addView(text("মেয়াদ শেষ হলে অর্ডার স্বয়ংক্রিয়ভাবে বন্ধ হয়ে যায় (স্ট্যাটাস বাতিল) — অর্ডারটি তালিকায় দেখা যাবে, মুছে ফেলা হয় না।", 13, TEXT, false));
+            content.addView(ec);
+        }
         if (o.isMonthly()) {
             SubscriptionStore.Subscription sub = SubscriptionStore.fromOrder(
                 o.serviceName, o.packageDetails, o.amount, o.dateMillis, 1);
             LinearLayout sc = card();
-            sc.addView(text("সাবস্ক্রিপশন (মাসিক)", 17, TEXT, true));
+            sc.addView(text("সাবস্ক্রিপশন (মাসিক)", 16, TEXT, true));
             sc.addView(text(SubscriptionStore.daysRemainingBn(sub), 26, PRIMARY, true));
             sc.addView(progressBar(sub.progressPercent()));
             sc.addView(text("শুরু: " + SubscriptionStore.formatDate(sub.startMillis)
@@ -1671,25 +1970,25 @@ public class MainActivity extends Activity {
             content.addView(sc);
         } else {
             LinearLayout nc = card();
-            nc.addView(text("এটি মাসিক সাবস্ক্রিপশন নয় — তাই এখানে দিনের হিসাব দেখানো হয় না। এককালীনের আলাদা ফাংশন পরে আলোচনা করে ঠিক করা হবে।", 13, TEXT, false));
+            nc.addView(text("এটি মাসিক সাবস্ক্রিপশন নয় — তাই এখানে দিনের হিসাব দেখানো হয় না।", 13, TEXT, false));
             content.addView(nc);
         }
-        final boolean admin = !demoMode && FirebaseAuthHelper.isAdmin();
+        final boolean admin = FirebaseAuthHelper.isAdmin();
         if (admin) {
             LinearLayout ac = card();
-            ac.addView(text("অ্যাডমিন — স্ট্যাটাস বদলান", 17, TEXT, true));
+            ac.addView(text("অ্যাডমিন — স্ট্যাটাস বদলান", 16, TEXT, true));
             if ("pending".equals(o.status)) {
-                ac.addView(primaryButton("▶ In Progress করুন", new View.OnClickListener() {
+                ac.addView(primaryButton(" In Progress করুন", new View.OnClickListener() {
                     @Override public void onClick(View v) { changeOrderStatus(o, "in_progress"); }
                 }));
-                ac.addView(outlineButton("✕ Cancel করুন", RED, new View.OnClickListener() {
+                ac.addView(outlineButton(" Cancel করুন", RED, new View.OnClickListener() {
                     @Override public void onClick(View v) { changeOrderStatus(o, "cancelled"); }
                 }));
             } else if ("in_progress".equals(o.status)) {
-                ac.addView(primaryButton("✓ Completed করুন", new View.OnClickListener() {
+                ac.addView(primaryButton(" Completed করুন", new View.OnClickListener() {
                     @Override public void onClick(View v) { changeOrderStatus(o, "completed"); }
                 }));
-                ac.addView(outlineButton("✕ Cancel করুন", RED, new View.OnClickListener() {
+                ac.addView(outlineButton(" Cancel করুন", RED, new View.OnClickListener() {
                     @Override public void onClick(View v) { changeOrderStatus(o, "cancelled"); }
                 }));
             } else {
@@ -1707,12 +2006,6 @@ public class MainActivity extends Activity {
             ac.addView(primaryButton("অ্যাডমিন মেসেজ সেভ করুন", new View.OnClickListener() {
                 @Override public void onClick(View v) {
                     final String msg = msgInput.getText().toString().trim();
-                    if (demoMode) {
-                        o.adminMessage = msg;
-                        notice = "ডেমো: অ্যাডমিন মেসেজ সেভ হয়েছে (লাইভে যায়নি)।";
-                        render();
-                        return;
-                    }
                     java.util.Map<String, Object> updates = new java.util.HashMap<String, Object>();
                     updates.put("adminMessage", msg);
                     FirebaseAuthHelper.updateOrderFields(o.id, updates,
@@ -1731,7 +2024,7 @@ public class MainActivity extends Activity {
             content.addView(ac);
         } else {
             LinearLayout nc = card();
-            nc.addView(text("স্ট্যাটাস শুধু অ্যাডমিন বদলাতে পারবেন। আপনার কিছু জানার থাকলে লিড চ্যাটে লিখুন।", 13, TEXT2, false));
+            nc.addView(text("স্ট্যাটাস শুধু অ্যাডমিন বদলাতে পারবেন। কিছু জানার থাকলে হোম থেকে সাপোর্ট / ইনবক্সে লিখুন।", 13, TEXT2, false));
             content.addView(nc);
         }
         if (o.adminMessage != null && o.adminMessage.length() > 0) {
@@ -1743,15 +2036,6 @@ public class MainActivity extends Activity {
     }
 
     private void changeOrderStatus(final OrderStore.Order o, final String newStatus) {
-        if (demoMode) {
-            o.status = newStatus;
-            if ("in_progress".equals(newStatus) && (o.startDate == null || o.startDate.length() == 0))
-                o.startDate = "ডেমো";
-            if ("completed".equals(newStatus)) o.completionDate = "ডেমো";
-            notice = "ডেমো: স্ট্যাটাস " + o.statusBn() + " হয়েছে (লাইভে যায়নি)।";
-            render();
-            return;
-        }
         java.util.Map<String, Object> updates = new java.util.HashMap<String, Object>();
         updates.put("status", newStatus);
         if ("in_progress".equals(newStatus) && (o.startDate == null || o.startDate.length() == 0)) {
@@ -1783,23 +2067,24 @@ public class MainActivity extends Activity {
     }
 
     private void showOrderForm() {
-        content.addView(ghostButton("← অর্ডারে ফিরুন", new View.OnClickListener() {
+        content.addView(ghostButton("অর্ডারে ফিরুন", new View.OnClickListener() {
             @Override public void onClick(View v) { go(S_ORDERS, false); }
         }));
-        content.addView(text("নতুন অর্ডার", 24, NAVY, true));
-        final boolean admin = !demoMode && FirebaseAuthHelper.isAdmin();
+        content.addView(text("নতুন অর্ডার", 26, NAVY, true));
+        content.addView(stepProgress(selectedPackage == null ? 1 : 2));
+        final boolean admin = FirebaseAuthHelper.isAdmin();
         if (admin) {
             LinearLayout ruleNote = card();
             ruleNote.setBackground(rounded(AMBER_SOFT, 20));
-            ruleNote.addView(text("এই অর্ডার আপনার নিজের অ্যাকাউন্টে তৈরি হবে। অন্য কাস্টমারের অ্যাকাউন্টে অর্ডার/সাবস্ক্রিপশন যোগ করতে Firestore rules আপডেট লাগবে — সেটা আলাদা পেন্ডিং টাস্ক, এখনো করা হয়নি।", 13, TEXT, false));
+            ruleNote.addView(text("এই অর্ডার আপনার নিজের অ্যাকাউন্টে তৈরি হবে। অন্য কাস্টমারের অ্যাকাউন্টে অর্ডার যোগ করা এখনো চালু হয়নি।", 13, TEXT, false));
             content.addView(ruleNote);
         }
         if (selectedPackage == null) {
             // Step 1: pick a package (verified prices only, amount auto-filled).
-            content.addView(text("প্যাকেজ বেছে নিন — দাম নিজে থেকে বসবে, বানিয়ে লেখা যাবে না।", 14, TEXT2, false));
+            content.addView(text("প্যাকেজ বেছে নিন — দাম নিজে থেকে বসবে।", 14, TEXT2, false));
             for (final OrderStore.OrderPackage pkg : OrderStore.PACKAGES) {
                 LinearLayout c = card();
-                c.addView(text(pkg.service, 17, TEXT, true));
+                c.addView(text(pkg.service, 16, TEXT, true));
                 LinearLayout row = new LinearLayout(this);
                 row.setOrientation(LinearLayout.HORIZONTAL);
                 row.setPadding(0, dp(6), 0, 0);
@@ -1819,7 +2104,7 @@ public class MainActivity extends Activity {
             }
             return;
         }
-        // Step 2: payment form (buyer's own payment details, like website).
+        // Step 2: payment form (buyer's own payment details, like app).
         final OrderStore.OrderPackage pkg = selectedPackage;
         LinearLayout pc = card();
         pc.addView(text(pkg.service, 18, NAVY, true));
@@ -1828,7 +2113,7 @@ public class MainActivity extends Activity {
         content.addView(pc);
         LinearLayout fc = card();
         // Payment number first, above the payment-method selector and the
-        // senderPhone/trxId fields, exactly like the website OrderModal.
+        // senderPhone/trxId fields, exactly like the app OrderModal.
         fc.addView(paymentInfoCard());
         final android.widget.Spinner methodSpinner = new android.widget.Spinner(this);
         String[] methods = new String[]{"bkash — bKash", "nagad — Nagad"};
@@ -1886,19 +2171,8 @@ public class MainActivity extends Activity {
                 String uid = FirebaseAuthHelper.currentUid();
                 String name = FirebaseAuthHelper.currentDisplayName();
                 if (name == null || name.length() == 0) name = "কাস্টমার";
-                if (demoMode || uid == null) {
-                    OrderStore.Order demo = new OrderStore.Order(
-                        String.valueOf(System.currentTimeMillis()), "demo-user", name,
-                        pkg.service, pkg.pkg, pkg.price, method, sender, trx,
-                        "pending", "ডেমো তারিখ", System.currentTimeMillis(),
-                        pageLink, reqs, pkg.billing);
-                    orders.add(0, demo);
-                    ordersLoaded = true;
-                    deriveMySubscription();
-                    currentOrder = demo;
-                    selectedPackage = null;
-                    notice = "ডেমো অর্ডার তৈরি হয়েছে — স্ট্যাটাস Pending (লাইভে যায়নি)।";
-                    go(S_ORDER_DETAIL, true);
+                if (uid == null) {
+                    notice = "লগইন করা নেই। আবার লগইন করুন।";
                     return;
                 }
                 final String fUid = uid;
@@ -1929,14 +2203,14 @@ public class MainActivity extends Activity {
             @Override public void onClick(View v) { selectedPackage = null; render(); }
         }));
         content.addView(fc);
-        content.addView(text("এই ফর্মে আপনার নিজের পেমেন্ট তথ্য (Sender নম্বর + TrxID) নেওয়া হয় — ওয়েবসাইটের অর্ডার ফর্মের মতোই। পেমেন্ট নম্বরটি উপরে দেখানো হয়েছে; এছাড়া AutoMateIQ-এর অন্য কোনো নম্বর/ইমেইল এখানে দেখানো হয় না।", 12, TEXT2, false));
+        content.addView(text("এই ফর্মে আপনার নিজের পেমেন্ট তথ্য (Sender নম্বর + TrxID) নেওয়া হয়। পেমেন্ট নম্বরটি উপরে দেখানো হয়েছে।", 12, TEXT2, false));
     }
 
     private void showRechargeForm() {
-        content.addView(ghostButton("← টোকেনে ফিরুন", new View.OnClickListener() {
+        content.addView(ghostButton("টোকেনে ফিরুন", new View.OnClickListener() {
             @Override public void onClick(View v) { go(S_TOKENS, false); }
         }));
-        content.addView(text("টোকেন রিচার্জ — এপিআই ক্রেডিট", 24, NAVY, true));
+        content.addView(text("টোকেন রিচার্জ — এপিআই ক্রেডিট", 26, NAVY, true));
         final String amount = selectedTokenAmount == null ? "৳২০০" : selectedTokenAmount;
         LinearLayout pc = card();
         pc.addView(text("রিচার্জ অ্যামাউন্ট: " + amount, 18, PRIMARY, true));
@@ -1984,9 +2258,8 @@ public class MainActivity extends Activity {
                 String uid = FirebaseAuthHelper.currentUid();
                 String name = FirebaseAuthHelper.currentDisplayName();
                 if (name == null || name.length() == 0) name = "কাস্টমার";
-                if (demoMode || uid == null) {
-                    notice = "ডেমো রিচার্জ রিকোয়েস্ট তৈরি হয়েছে — স্ট্যাটাস Pending (লাইভে যায়নি)।";
-                    go(S_TOKENS, true);
+                if (uid == null) {
+                    notice = "লগইন করা নেই। আবার লগইন করুন।";
                     return;
                 }
                 FirebaseAuthHelper.createRecharge(uid, name, digits, method, sender, trx,
@@ -2006,10 +2279,8 @@ public class MainActivity extends Activity {
 
     private void toggleLeadPause(final LeadsStore.Lead lead) {
         final boolean toPaused = !lead.paused;
-        if (demoMode || FirebaseAuthHelper.currentUid() == null) {
-            if (toPaused) leadsStore.takeOver(lead);
-            else leadsStore.resumeAi(lead);
-            renderThreadScreen();
+        if (FirebaseAuthHelper.currentUid() == null) {
+            Toast.makeText(this, "লগইন করা নেই। আবার লগইন করুন।", Toast.LENGTH_SHORT).show();
             return;
         }
         FirebaseAuthHelper.updateLeadStatus(lead, toPaused,
@@ -2027,27 +2298,27 @@ public class MainActivity extends Activity {
             });
     }
 
-    // ---- Screens: Connect / Services / Subscriptions / Tokens / About ----
+    // ---- Screens: Connect / Services / Subscriptions / Accesss / About ----
     private void showConnect() {
-        content.addView(text("ফেসবুক কানেক্ট", 24, NAVY, true));
+        content.addView(text("ফেসবুক কানেক্ট", 26, NAVY, true));
         TextView sub = text("আপনার পেজ কানেক্ট করলে পেজের মেসেজ আর লিড এই অ্যাপেই আসবে।", 14, TEXT2, false);
         sub.setPadding(0, dp(4), 0, dp(12));
         content.addView(sub);
 
         LinearLayout status = card();
-        status.addView(text("পেজ: AutoMateIQ", 17, TEXT, true));
+        status.addView(text("পেজ: AutoMateIQ", 16, TEXT, true));
         LinearLayout srow = new LinearLayout(this);
         srow.setOrientation(LinearLayout.HORIZONTAL);
         srow.setPadding(0, dp(8), 0, 0);
-        srow.addView(chip("● বট সার্ভারের মাধ্যমে কানেক্টেড", GREEN_SOFT, GREEN));
+        srow.addView(chip(" কানেক্টেড", GREEN_SOFT, GREEN));
         status.addView(srow);
-        TextView note = text("পেজের টোকেন কখনো অ্যাপের ভিতরে রাখা হয় না, সেটা সার্ভারেই থাকে। অ্যাপ শুধু সার্ভারের মাধ্যমে রিপ্লাই পাঠায়।", 13, TEXT2, false);
+        TextView note = text("কানেক্ট হলে পেজের মেসেজ এখানে দেখা যাবে।", 13, TEXT2, false);
         note.setPadding(0, dp(8), 0, 0);
         status.addView(note);
         content.addView(status);
 
         String[][] steps = {
-            {"১", "ফেসবুকে লগইন করুন", "আপনার ফেসবুক অ্যাকাউন্ট দিয়ে ব্রাউজারে লগইন করুন।"},
+            {"১", "ফেসবুকে লগইন করুন", "আপনার ফেসবুক অ্যাকাউন্ট দিয়ে লগইন করুন।"},
             {"২", "পেজ বেছে নিন", "যে পেজের বট চালাতে চান, সেই পেজটি বেছে নিন।"},
             {"৩", "মেসেঞ্জার পারমিশন দিন", "পেজ মেসেজ পড়া ও উত্তর দেওয়ার অনুমতি দিন।"},
             {"৪", "লিড অ্যাপে দেখুন", "কানেক্ট হলে পেজের মেসেজ এই অ্যাপের লিডসে আসবে।"},
@@ -2075,18 +2346,12 @@ public class MainActivity extends Activity {
             c.addView(row);
             content.addView(c);
         }
-        content.addView(outlineButton("ফেসবুক পেজ খুলুন (ব্রাউজারে)", PRIMARY,
-            new View.OnClickListener() {
-                @Override public void onClick(View v) { openUrl(LiveDataClient.PAGE_URL); }
-            }));
-        content.addView(outlineButton("ওয়েবসাইট অ্যাডমিন প্যানেল খুলুন (ব্রাউজারে)", PRIMARY,
-            new View.OnClickListener() {
-                @Override public void onClick(View v) { openUrl(LiveDataClient.WEBSITE_URL); }
-            }));
+        
+        
     }
 
     private void showServices() {
-        content.addView(text("সার্ভিস", 24, NAVY, true));
+        content.addView(text("সার্ভিস", 26, NAVY, true));
         TextView sub = text("যেকোনো সার্ভিসে ট্যাপ করলে পুরো দামের তালিকা দেখা যাবে।", 14, TEXT2, false);
         sub.setPadding(0, dp(4), 0, dp(12));
         content.addView(sub);
@@ -2105,7 +2370,7 @@ public class MainActivity extends Activity {
                     0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f);
                 lp.setMargins(k == 0 ? 0 : dp(7), 0, k == 0 ? dp(7) : 0, dp(14));
                 c.setLayoutParams(lp);
-                TextView icon = text(s.icon, 24, TEXT, false);
+                ImageView icon = iconView(iconRes(s.icon), TEXT);
                 c.addView(icon);
                 c.addView(text(s.name, 16, TEXT, true));
                 TextView d = text(s.desc, 13, TEXT2, false);
@@ -2123,7 +2388,7 @@ public class MainActivity extends Activity {
             }
             content.addView(row);
         }
-        content.addView(ghostButton("অ্যাপ সম্পর্কে →", new View.OnClickListener() {
+        content.addView(ghostButton("অ্যাপ সম্পর্কে", new View.OnClickListener() {
             @Override public void onClick(View v) { go(S_ABOUT, true); }
         }));
     }
@@ -2131,11 +2396,12 @@ public class MainActivity extends Activity {
     private void showServiceDetail() {
         final Service s = currentService;
         if (s == null) { go(S_SERVICES, false); return; }
-        content.addView(ghostButton("← সার্ভিসে ফিরুন", new View.OnClickListener() {
+        content.addView(ghostButton("সার্ভিসে ফিরুন", new View.OnClickListener() {
             @Override public void onClick(View v) { go(S_SERVICES, false); }
         }));
         LinearLayout head = card();
-        head.addView(text(s.icon + "  " + s.name, 22, NAVY, true));
+        head.addView(iconView(iconRes(s.icon), NAVY));
+        head.addView(text(s.name, 22, NAVY, true));
         TextView d = text(s.desc, 15, TEXT2, false);
         d.setPadding(0, dp(8), 0, 0);
         head.addView(d);
@@ -2143,7 +2409,7 @@ public class MainActivity extends Activity {
         content.addView(head);
 
         LinearLayout prices = card();
-        prices.addView(text("দামের তালিকা", 17, TEXT, true));
+        prices.addView(text("দামের তালিকা", 16, TEXT, true));
         for (String p : s.prices) {
             TextView row = text("•  " + p, 15, TEXT, false);
             row.setPadding(0, dp(6), 0, 0);
@@ -2152,9 +2418,9 @@ public class MainActivity extends Activity {
         content.addView(prices);
 
         LinearLayout ben = card();
-        ben.addView(text("যা যা পাবেন", 17, TEXT, true));
+        ben.addView(text("যা যা পাবেন", 16, TEXT, true));
         for (String b : s.benefits) {
-            TextView row = text("✓  " + b, 15, TEXT, false);
+            TextView row = text("  " + b, 15, TEXT, false);
             row.setPadding(0, dp(6), 0, 0);
             ben.addView(row);
         }
@@ -2162,7 +2428,7 @@ public class MainActivity extends Activity {
 
         content.addView(primaryButton("অ্যাপেই অর্ডার করুন", new View.OnClickListener() {
             @Override public void onClick(View v) {
-                // v6: ordering happens IN-APP, never via the website.
+                // v6: ordering happens IN-APP, never via the app.
                 // Default to this service's first (monthly) package;
                 // the form's "other package" button can change it.
                 selectedPackage = null;
@@ -2179,13 +2445,13 @@ public class MainActivity extends Activity {
     }
 
     private void showSubscriptions() {
-        content.addView(text("সাবস্ক্রিপশন কিনুন", 24, NAVY, true));
+        content.addView(text("সাবস্ক্রিপশন কিনুন", 26, NAVY, true));
         TextView sub = text("শুধু মাসিক প্যাকেজ। এককালীন প্যাকেজ মাসিক নয় — তাই এখানে দিনের হিসাব দেখানো হয় না।", 14, TEXT2, false);
         sub.setPadding(0, dp(4), 0, dp(12));
         content.addView(sub);
         for (final SubscriptionStore.MonthlyPackage p : SubscriptionStore.MONTHLY_PACKAGES) {
             LinearLayout c = card();
-            c.addView(text(p.service, 17, TEXT, true));
+            c.addView(text(p.service, 16, TEXT, true));
             LinearLayout row = new LinearLayout(this);
             row.setOrientation(LinearLayout.HORIZONTAL);
             row.setPadding(0, dp(6), 0, 0);
@@ -2206,16 +2472,16 @@ public class MainActivity extends Activity {
         note.setBackground(rounded(AMBER_SOFT, 20));
         note.addView(text("এককালীন প্যাকেজের আলাদা ফাংশন পরে আলোচনা করে ঠিক করা হবে — এখন এখানে বানানো হয়নি।", 13, TEXT, false));
         content.addView(note);
-        content.addView(outlineButton("🪙 টোকেন কিনুন", PRIMARY, new View.OnClickListener() {
+        content.addView(outlineButton(" টোকেন কিনুন", PRIMARY, new View.OnClickListener() {
             @Override public void onClick(View v) { go(S_TOKENS, true); }
         }));
-        content.addView(outlineButton("⭐ আমার সাবস্ক্রিপশন দেখুন", PRIMARY, new View.OnClickListener() {
+        content.addView(outlineButton(" আমার সাবস্ক্রিপশন দেখুন", PRIMARY, new View.OnClickListener() {
             @Override public void onClick(View v) { go(S_MY_SUB, true); }
         }));
     }
 
     private void showTokens() {
-        content.addView(text("টোকেন কিনুন — এপিআই ক্রেডিট", 24, NAVY, true));
+        content.addView(text("টোকেন কিনুন — এপিআই ক্রেডিট", 26, NAVY, true));
         TextView sub = text("৳২০০ থেকে শুরু। যত টাকার এপিআই চান নিতে পারবেন।", 14, TEXT2, false);
         sub.setPadding(0, dp(4), 0, dp(12));
         content.addView(sub);
@@ -2241,18 +2507,17 @@ public class MainActivity extends Activity {
             content.addView(c);
         }
         LinearLayout rules = card();
-        rules.addView(text("নিয়ম", 17, TEXT, true));
-        TextView r = text("bKash / Nagad পার্সোনাল • মেয়াদ শেষ হয় না • Pay As You Go • অ্যাডমিন অনুমোদনের পর ক্রেডিট যোগ হয় • ৳২০০ থেকে যেকোনো অ্যামাউন্ট নেওয়া যায় • প্রতি-মেসেজ রেট ওয়েবসাইটে দেওয়া নেই, তাই এখানে কোনো রেট লেখা হয়নি", 14, TEXT2, false);
+        rules.addView(text("নিয়ম", 16, TEXT, true));
+        TextView r = text("bKash / Nagad পার্সোনাল • মেয়াদ শেষ হয় না • Pay As You Go • অ্যাডমিন অনুমোদনের পর ক্রেডিট যোগ হয় • ৳২০০ থেকে যেকোনো অ্যামাউন্ট নেওয়া যায়", 14, TEXT2, false);
         r.setPadding(0, dp(6), 0, 0);
         rules.addView(r);
         content.addView(rules);
     }
 
     private void showMySubscription() {
-        content.addView(text("আমার সাবস্ক্রিপশন", 24, NAVY, true));
-        // v6: subscription is DERIVED FROM REAL ORDERS, never demo by
-        // default. Latest monthly, non-cancelled order wins.
-        if (!demoMode && ordersLoaded) {
+        content.addView(text("আমার সাবস্ক্রিপশন", 26, NAVY, true));
+        // Subscription is DERIVED FROM REAL ORDERS. Latest monthly, non-cancelled order wins.
+        if (ordersLoaded) {
             SubscriptionStore.Subscription derived =
                 OrderStore.subscriptionFromOrders(orders);
             mySubscription = derived;
@@ -2268,18 +2533,15 @@ public class MainActivity extends Activity {
                 }
             }
         }
-        if (!demoMode && signedIn && !ordersLoaded) {
+        if (signedIn && !ordersLoaded) {
             content.addView(bannerCard("অর্ডার লোড হচ্ছে… রিফ্রেশ চাপলে আবার আনা হবে।", SOFT_BLUE, PRIMARY));
-            content.addView(outlineButton("🔄 অর্ডার রিফ্রেশ করুন", PRIMARY, new View.OnClickListener() {
+            content.addView(outlineButton(" অর্ডার রিফ্রেশ করুন", PRIMARY, new View.OnClickListener() {
                 @Override public void onClick(View v) { loadLiveOrders(); render(); }
             }));
         }
-        if (demoMode) {
-            content.addView(bannerCard("🧪 ডেমো প্রিভিউ — এটি আসল সাবস্ক্রিপশন নয়", AMBER_SOFT, AMBER));
-        }
         if (mySubscription == null) {
             LinearLayout c = card();
-            c.addView(text("কোনো মাসিক সাবস্ক্রিপশন নেই", 17, TEXT, true));
+            c.addView(text("কোনো মাসিক সাবস্ক্রিপশন নেই", 16, TEXT, true));
             TextView t = text("মাসিক প্যাকেজ কিনলে এখানে সার্ভিস, প্যাকেজ, শুরু, শেষ আর কত দিন বাকি আছে — সব দেখা যাবে।", 14, TEXT2, false);
             t.setPadding(0, dp(6), 0, 0);
             c.addView(t);
@@ -2322,36 +2584,638 @@ public class MainActivity extends Activity {
         }
     }
 
+
+    // ================= v7 ADMIN PANEL =================
+
+    private boolean monthlyExpired(OrderStore.Order o) {
+        if (o == null || !o.isMonthly()) return false;
+        SubscriptionStore.Subscription sub = SubscriptionStore.fromOrder(
+            o.serviceName, o.packageDetails, o.amount, o.dateMillis, 1);
+        return sub.expiryMillis < System.currentTimeMillis();
+    }
+
+    private void loadLiveUsers() {
+        usersLoading = true;
+        usersError = null;
+        FirebaseAuthHelper.fetchUsers(
+            new FirebaseAuthHelper.ResultCallback<java.util.List<UsersStore.User>>() {
+                @Override public void onSuccess(java.util.List<UsersStore.User> live) {
+                    users = live;
+                    usersLoaded = true;
+                    usersLoading = false;
+                    usersError = null;
+                    if (screen == S_DASH || screen == S_CUSTOMERS
+                        || screen == S_CUSTOMER_DETAIL || screen == S_PAGES) render();
+                }
+                @Override public void onError(String message) {
+                    usersLoading = false;
+                    usersError = message;
+                    if (screen == S_DASH || screen == S_CUSTOMERS || screen == S_PAGES) render();
+                }
+            });
+    }
+
+    // v7 AUTO-EXPIRE: on admin load, monthly orders past expiry with a
+    // still-open status are auto-cancelled in database. One-time
+    // orders are never touched. Cancelled orders stay visible —
+    // nothing is ever deleted here.
+    private void runAutoExpire() {
+        if (autoExpireRunForLoad) return;
+        autoExpireRunForLoad = true;
+        int candidates = 0;
+        for (final OrderStore.Order o : orders) {
+            if (!o.isMonthly()) continue;
+            if (!("pending".equals(o.status) || "in_progress".equals(o.status)
+                || "approved".equals(o.status))) continue;
+            if (!monthlyExpired(o)) continue;
+            candidates++;
+            java.util.Map<String, Object> updates = new java.util.HashMap<String, Object>();
+            updates.put("status", "cancelled");
+            updates.put("adminMessage", "Offer ended — auto-stopped on expiry");
+            FirebaseAuthHelper.updateOrderFields(o.id, updates,
+                new FirebaseAuthHelper.ResultCallback<Boolean>() {
+                    @Override public void onSuccess(Boolean ok) {
+                        o.status = "cancelled";
+                        o.adminMessage = "Offer ended — auto-stopped on expiry";
+                        if (screen == S_DASH || screen == S_ORDERS) render();
+                    }
+                    @Override public void onError(String message) {
+                        // Local display still shows "মেয়াদ শেষ" via
+                        // monthlyExpired(); the write can be retried
+                        // from the order detail screen.
+                    }
+                });
+        }
+        autoExpireCount = candidates;
+        if (candidates > 0) {
+            notice = bn(String.valueOf(candidates))
+                + "টি মাসিক অর্ডারের অফার শেষ হয়েছে — স্বয়ংক্রিয়ভাবে বাতিল করা হচ্ছে। বাতিল অর্ডারগুলো তালিকায় দেখা যাবে, মুছে ফেলা হয়নি।";
+        }
+    }
+
+    private void showAdminDashboard() {
+        LinearLayout hero = new LinearLayout(this);
+        hero.setOrientation(LinearLayout.VERTICAL);
+        hero.setBackground(heroShiftDrawable());
+        hero.setElevation(dp(2));
+        hero.setPadding(dp(20), dp(20), dp(20), dp(20));
+        LinearLayout.LayoutParams hlp = new LinearLayout.LayoutParams(
+            ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT);
+        hlp.setMargins(0, 0, 0, dp(14));
+        hero.setLayoutParams(hlp);
+        hero.addView(text("অ্যাডমিন প্যানেল", 26, Color.WHITE, true));
+        hero.addView(text("কানেক্টেড পেজ, কাস্টমার, অর্ডার আর সাবস্ক্রিপশন — এক নজরে", 14, Color.WHITE, false));
+        content.addView(hero);
+
+        // Connected Page card (AutoMateIQ's own Page — never auto-stopped).
+        LinearLayout pc = card();
+        pc.addView(text(" কানেক্টেড পেজ — AutoMateIQ", 16, TEXT, true));
+        LinearLayout prow = new LinearLayout(this);
+        prow.setOrientation(LinearLayout.HORIZONTAL);
+        prow.setPadding(0, dp(8), 0, 0);
+        prow.addView(chip(" কানেক্টেড", GREEN_SOFT, GREEN));
+        pc.addView(prow);
+        pc.addView(text("পেজ: facebook.com/automateiq.xyz", 14, TEXT, false));
+        pc.addView(text("Page ID: 825495483971307", 13, TEXT2, false));
+        TextView pn = text("কানেক্টেড পেজের মেসেজ লিডসে দেখা যাবে।", 13, TEXT2, false);
+        pn.setPadding(0, dp(6), 0, 0);
+        pc.addView(pn);
+        
+        pc.addView(outlineButton("কাস্টমার পেজ দেখুন", PRIMARY, new View.OnClickListener() {
+            @Override public void onClick(View v) { go(S_PAGES, true); }
+        }));
+        content.addView(pc);
+
+        // Admin stats: users, orders, active subs, expired.
+        int activeSubs = 0, expiredN = 0;
+        for (OrderStore.Order o : orders) {
+            if (!o.isMonthly()) continue;
+            if (monthlyExpired(o)) expiredN++;
+            else if (!"cancelled".equals(o.status) && !"rejected".equals(o.status)) activeSubs++;
+        }
+        String[][] stats = {
+            {"ic_users", usersLoaded ? bn(String.valueOf(users.size())) : "—", "মোট ইউজার"},
+            {"ic_list", bn(String.valueOf(orders.size())), "মোট অর্ডার"},
+            {"ic_check", bn(String.valueOf(activeSubs)), "চালু সাবস্ক্রিপশন"},
+            {"ic_clock", bn(String.valueOf(expiredN)), "মেয়াদ শেষ"},
+        };
+        for (int r = 0; r < 2; r++) {
+            LinearLayout row = new LinearLayout(this);
+            row.setOrientation(LinearLayout.HORIZONTAL);
+            for (int k = 0; k < 2; k++) {
+                final String[] st = stats[r * 2 + k];
+                final int target = (r == 0 && k == 0) ? S_CUSTOMERS : S_ORDERS;
+                LinearLayout sc = new LinearLayout(this);
+                sc.setOrientation(LinearLayout.VERTICAL);
+                sc.setBackground(rounded(SURFACE, 20));
+                sc.setElevation(dp(2));
+                sc.setPadding(dp(16), dp(14), dp(16), dp(14));
+                LinearLayout.LayoutParams slp = new LinearLayout.LayoutParams(
+                    0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f);
+                slp.setMargins(k == 0 ? 0 : dp(7), 0, k == 0 ? dp(7) : 0, dp(14));
+                sc.setLayoutParams(slp);
+                LinearLayout srow = new LinearLayout(this);
+                srow.setOrientation(LinearLayout.HORIZONTAL);
+                srow.setGravity(Gravity.CENTER_VERTICAL);
+                srow.addView(iconView(iconRes(st[0]), TEXT2));
+                TextView slab = text(st[2], 13, TEXT2, false);
+                slab.setPadding(dp(6), 0, 0, 0);
+                srow.addView(slab);
+                sc.addView(srow);
+                sc.addView(text(st[1], 26, NAVY, true));
+                sc.setOnClickListener(new View.OnClickListener() {
+                    @Override public void onClick(View v) { go(target, true); }
+                });
+                row.addView(sc);
+            }
+            content.addView(row);
+        }
+        if (autoExpireCount > 0) {
+            content.addView(bannerCard(" " + bn(String.valueOf(autoExpireCount)) + "টি মাসিক অর্ডারের অফার শেষ হয়েছে — স্বয়ংক্রিয়ভাবে বাতিল করা হয়েছে।", AMBER_SOFT, AMBER));
+        }
+        LinearLayout botNote = card();
+        botNote.setBackground(rounded(AMBER_SOFT, 20));
+        botNote.addView(text("মেয়াদ শেষ হলে অর্ডার বাতিল দেখাবে। AutoMateIQ-এর নিজের পেজের ক্ষেত্রে এটি প্রযোজ্য নয়।", 13, TEXT, false));
+        content.addView(botNote);
+
+        // v3 quick actions: horizontal scroll row, icon tile + short label.
+        LinearLayout qcTitle = new LinearLayout(this);
+        qcTitle.setOrientation(LinearLayout.VERTICAL);
+        qcTitle.addView(text("দ্রুত কাজ", 18, NAVY, true));
+        content.addView(qcTitle);
+        HorizontalScrollView qscroll = new HorizontalScrollView(this);
+        qscroll.setHorizontalScrollBarEnabled(false);
+        LinearLayout qrow = new LinearLayout(this);
+        qrow.setOrientation(LinearLayout.HORIZONTAL);
+        qrow.addView(quickAction("ic_list", "অর্ডার", new View.OnClickListener() {
+            @Override public void onClick(View v) { go(S_ORDERS, true); }
+        }));
+        qrow.addView(quickAction("ic_users", "কাস্টমার", new View.OnClickListener() {
+            @Override public void onClick(View v) { go(S_CUSTOMERS, true); }
+        }));
+        qrow.addView(quickAction("ic_page", "পেজ", new View.OnClickListener() {
+            @Override public void onClick(View v) { go(S_PAGES, true); }
+        }));
+        qrow.addView(quickAction("ic_chat", "লিডস", new View.OnClickListener() {
+            @Override public void onClick(View v) { go(S_LEADS, true); }
+        }));
+        qscroll.addView(qrow);
+        content.addView(qscroll);
+
+        // Recent orders.
+        LinearLayout recent = card();
+        recent.addView(text("সাম্প্রতিক অর্ডার", 16, TEXT, true));
+        if (ordersLoading) {
+            recent.addView(text("লোড হচ্ছে…", 14, TEXT2, false));
+        } else if (ordersError != null) {
+            recent.addView(text(ordersError, 14, RED, true));
+        } else if (orders.isEmpty()) {
+            recent.addView(text("এখনো কোনো অর্ডার নেই।", 14, TEXT2, false));
+        } else {
+            for (int i = 0; i < Math.min(3, orders.size()); i++) {
+                final OrderStore.Order ro = orders.get(i);
+                LinearLayout rrow = new LinearLayout(this);
+                rrow.setOrientation(LinearLayout.HORIZONTAL);
+                rrow.setGravity(Gravity.CENTER_VERTICAL);
+                rrow.setPadding(0, dp(8), 0, dp(8));
+                LinearLayout mid = new LinearLayout(this);
+                mid.setOrientation(LinearLayout.VERTICAL);
+                mid.addView(text(ro.serviceName + " • " + ro.amount, 15, TEXT, true));
+                mid.addView(text("কাস্টমার: " + ro.userName, 13, TEXT2, false));
+                LinearLayout.LayoutParams rmp = new LinearLayout.LayoutParams(
+                    0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f);
+                rrow.addView(statusDot(statusColor(ro.status)));
+                rrow.addView(mid, rmp);
+                rrow.addView(orderStatusChip(ro));
+                rrow.setBackground(rippleBackground());
+                rrow.setClickable(true);
+                rrow.setOnClickListener(new View.OnClickListener() {
+                    @Override public void onClick(View v) { currentOrder = ro; go(S_ORDER_DETAIL, true); }
+                });
+                recent.addView(rrow);
+            }
+            recent.addView(ghostButton("সব অর্ডার দেখুন", new View.OnClickListener() {
+                @Override public void onClick(View v) { go(S_ORDERS, true); }
+            }));
+        }
+        content.addView(recent);
+        content.addView(outlineButton(" কাস্টমার + অর্ডার রিফ্রেশ করুন", PRIMARY, new View.OnClickListener() {
+            @Override public void onClick(View v) { loadLiveUsers(); loadLiveOrders(); }
+        }));
+    }
+
+    private void showCustomers() {
+        content.addView(text("কাস্টমার", 26, NAVY, true));
+        content.addView(text("শুধু পরিচয়, অর্ডার, পেজ আর সাবস্ক্রিপশন দেখা যায়।", 13, TEXT2, false));
+        if (usersLoading) { content.addView(text("লোড হচ্ছে…", 14, TEXT2, false)); return; }
+        if (usersError != null) {
+            content.addView(text(usersError, 14, RED, true));
+            content.addView(primaryButton("আবার চেষ্টা করুন", new View.OnClickListener() {
+                @Override public void onClick(View v) { loadLiveUsers(); render(); }
+            }));
+            return;
+        }
+        if (!usersLoaded) {
+            content.addView(primaryButton("কাস্টমার লোড করুন", new View.OnClickListener() {
+                @Override public void onClick(View v) { loadLiveUsers(); render(); }
+            }));
+            return;
+        }
+        java.util.List<UsersStore.User> customers = new java.util.ArrayList<UsersStore.User>();
+        for (UsersStore.User u : users) {
+            if (!u.isAdminUser()) customers.add(u);
+        }
+        content.addView(text("মোট " + bn(String.valueOf(customers.size())) + " জন কাস্টমার", 14, TEXT2, false));
+        if (customers.isEmpty()) {
+            LinearLayout c = card();
+            c.addView(text("এখনো কোনো কাস্টমার পাওয়া যায়নি", 16, TEXT, true));
+            c.addView(text("কেউ সাইন আপ করলে এখানে দেখা যাবে।", 14, TEXT2, false));
+            content.addView(c);
+            return;
+        }
+        for (final UsersStore.User u : customers) {
+            LinearLayout row = card();
+            LinearLayout top = new LinearLayout(this);
+            top.setOrientation(LinearLayout.HORIZONTAL);
+            top.setGravity(Gravity.CENTER_VERTICAL);
+            top.addView(avatar(u.initial(), PRIMARY));
+            LinearLayout mid = new LinearLayout(this);
+            mid.setOrientation(LinearLayout.VERTICAL);
+            mid.setPadding(dp(12), 0, dp(8), 0);
+            mid.addView(text(u.name, 16, TEXT, true));
+            mid.addView(text("ID: " + u.id, 12, TEXT2, false));
+            LinearLayout.LayoutParams mp = new LinearLayout.LayoutParams(
+                0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f);
+            top.addView(mid, mp);
+            top.addView(u.hasPage() ? chip(u.pageStatusBn(), GREEN_SOFT, GREEN) : chip("পেজ রেকর্ড নেই", SOFT_BLUE, PRIMARY));
+            row.addView(top);
+            // Subscription days for this customer, from their orders.
+            java.util.List<OrderStore.Order> uo = new java.util.ArrayList<OrderStore.Order>();
+            for (OrderStore.Order o : orders) {
+                if (u.id.equals(o.userId)) uo.add(o);
+            }
+            SubscriptionStore.Subscription sub = OrderStore.subscriptionFromOrders(uo);
+            if (sub != null) {
+                row.addView(text("সাবস্ক্রিপশন: " + SubscriptionStore.daysRemainingBn(sub)
+                    + "  •  শেষ: " + SubscriptionStore.formatDate(sub.expiryMillis), 13, PRIMARY, true));
+            } else {
+                row.addView(text("অর্ডার: " + bn(String.valueOf(uo.size())) + "টি  •  কোনো মাসিক সাবস্ক্রিপশন নেই", 13, TEXT2, false));
+            }
+            row.setBackground(rippleBackground());
+            row.setClickable(true);
+            row.setOnClickListener(new View.OnClickListener() {
+                @Override public void onClick(View v) { currentCustomer = u; go(S_CUSTOMER_DETAIL, true); }
+            });
+            content.addView(row);
+        }
+        content.addView(outlineButton(" কাস্টমার রিফ্রেশ করুন", PRIMARY, new View.OnClickListener() {
+            @Override public void onClick(View v) { loadLiveUsers(); render(); }
+        }));
+    }
+
+    private void showCustomerDetail() {
+        final UsersStore.User u = currentCustomer;
+        if (u == null) { go(S_CUSTOMERS, false); return; }
+        content.addView(ghostButton("কাস্টমারে ফিরুন", new View.OnClickListener() {
+            @Override public void onClick(View v) { go(S_CUSTOMERS, false); }
+        }));
+        if (u.localOnly) {
+            content.addView(bannerCard(" এই পেজ রেকর্ডটি সংরক্ষণ করা যায়নি। সঠিক userId দিয়ে আবার সংরক্ষণ করুন।", AMBER_SOFT, AMBER));
+        }
+        LinearLayout head = card();
+        LinearLayout hrow = new LinearLayout(this);
+        hrow.setOrientation(LinearLayout.HORIZONTAL);
+        hrow.setGravity(Gravity.CENTER_VERTICAL);
+        hrow.addView(avatar(u.initial(), PRIMARY));
+        LinearLayout mid = new LinearLayout(this);
+        mid.setOrientation(LinearLayout.VERTICAL);
+        mid.setPadding(dp(12), 0, dp(8), 0);
+        mid.addView(text(u.name, 20, NAVY, true));
+        mid.addView(text("ID: " + u.id, 13, TEXT2, false));
+        if (u.location.length() > 0) mid.addView(text("লোকেশন: " + u.location, 13, TEXT2, false));
+        LinearLayout.LayoutParams mp = new LinearLayout.LayoutParams(
+            0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f);
+        hrow.addView(mid, mp);
+        hrow.addView(chip("কাস্টমার", SOFT_BLUE, PRIMARY));
+        head.addView(hrow);
+        content.addView(head);
+
+        LinearLayout pg = card();
+        pg.addView(text("কাস্টমারের পেজ", 16, TEXT, true));
+        if (u.hasPage()) {
+            if (u.pageName.length() > 0) pg.addView(text(u.pageName, 16, TEXT, true));
+            if (u.pageId.length() > 0) pg.addView(text("Page ID: " + u.pageId, 13, TEXT2, false));
+            if (u.pageLink.length() > 0) pg.addView(text("লিংক: " + u.pageLink, 13, TEXT2, false));
+            pg.addView(chip(u.pageStatusBn(), GREEN_SOFT, GREEN));
+            if (u.pageNotes.length() > 0) pg.addView(text("নোট: " + u.pageNotes, 13, TEXT, false));
+            if (u.pageLink.length() > 0) {
+                final String link = u.pageLink;
+                pg.addView(outlineButton("পেজ লিংক খুলুন (ব্রাউজারে)", PRIMARY, new View.OnClickListener() {
+                    @Override public void onClick(View v) { openUrl(link); }
+                }));
+            }
+        } else {
+            pg.addView(text("এখনো কোনো পেজ রেকর্ড নেই।", 14, TEXT2, false));
+        }
+        pg.addView(primaryButton("পেজ রেকর্ড যোগ / সম্পাদনা করুন", new View.OnClickListener() {
+            @Override public void onClick(View v) { pendingPageUser = u; go(S_PAGE_FORM, true); }
+        }));
+        content.addView(pg);
+
+        java.util.List<OrderStore.Order> uo = new java.util.ArrayList<OrderStore.Order>();
+        for (OrderStore.Order o : orders) {
+            if (u.id.equals(o.userId)) uo.add(o);
+        }
+        SubscriptionStore.Subscription sub = OrderStore.subscriptionFromOrders(uo);
+        LinearLayout sc = card();
+        sc.addView(text("সাবস্ক্রিপশন", 16, TEXT, true));
+        if (sub != null) {
+            sc.addView(text(sub.service + " • " + sub.pkg + " • " + sub.price, 15, TEXT, false));
+            sc.addView(text(SubscriptionStore.daysRemainingBn(sub), 24, PRIMARY, true));
+            sc.addView(progressBar(sub.progressPercent()));
+            sc.addView(text("শুরু: " + SubscriptionStore.formatDate(sub.startMillis)
+                + "  •  শেষ: " + SubscriptionStore.formatDate(sub.expiryMillis), 13, TEXT2, false));
+            sc.addView(sub.isActive() ? chip("চালু আছে", GREEN_SOFT, GREEN) : chip("মেয়াদ শেষ", RED_SOFT, RED));
+        } else {
+            sc.addView(text("কোনো মাসিক সাবস্ক্রিপশন নেই। এককালীন অর্ডারের দিনের হিসাব দেখানো হয় না।", 14, TEXT2, false));
+        }
+        content.addView(sc);
+
+        LinearLayout oc = card();
+        oc.addView(text("এই কাস্টমারের অর্ডার (" + bn(String.valueOf(uo.size())) + "টি)", 16, TEXT, true));
+        if (uo.isEmpty()) {
+            oc.addView(text("এখনো কোনো অর্ডার নেই।", 14, TEXT2, false));
+        } else {
+            for (final OrderStore.Order o : uo) {
+                LinearLayout rrow = new LinearLayout(this);
+                rrow.setOrientation(LinearLayout.HORIZONTAL);
+                rrow.setGravity(Gravity.CENTER_VERTICAL);
+                rrow.setPadding(0, dp(8), 0, dp(8));
+                TextView nm = text(o.serviceName + " • " + o.amount, 15, TEXT, true);
+                LinearLayout.LayoutParams rmp = new LinearLayout.LayoutParams(
+                    0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f);
+                rrow.addView(nm, rmp);
+                rrow.addView(orderStatusChip(o));
+                rrow.setBackground(rippleBackground());
+                rrow.setClickable(true);
+                rrow.setOnClickListener(new View.OnClickListener() {
+                    @Override public void onClick(View v) { currentOrder = o; go(S_ORDER_DETAIL, true); }
+                });
+                oc.addView(rrow);
+            }
+        }
+        content.addView(oc);
+    }
+
+    private void showPages() {
+        content.addView(text("পেজ — কানেক্ট ও অনবোর্ডিং", 26, NAVY, true));
+        LinearLayout pc = card();
+        pc.addView(text(" কানেক্টেড পেজ — AutoMateIQ", 16, TEXT, true));
+        pc.addView(chip(" কানেক্টেড", GREEN_SOFT, GREEN));
+        pc.addView(text("পেজ: facebook.com/automateiq.xyz  •  Page ID: 825495483971307", 13, TEXT2, false));
+        pc.addView(text("কানেক্টেড পেজের মেসেজ লিডসে দেখা যাবে।", 13, TEXT2, false));
+        
+        content.addView(pc);
+
+        LinearLayout steps = card();
+        steps.addView(text("কাস্টমারের পেজ যেভাবে কানেক্ট হবে", 16, TEXT, true));
+        String[][] st = {
+            {"১", "AutoMateIQ অ্যাডমিনকে আপনার পেজে যোগ করুন", "কাস্টমার তার ফেসবুক পেজের সেটিংস থেকে AutoMateIQ-এর অ্যাডমিনকে Page Admin হিসেবে যোগ করবেন, অথবা নিজে একটি Meta App তৈরি করতে পারেন।"},
+            {"২", "Test হিসেবে যোগ করুন", "অ্যাক্সেস পেলে নিচের ফর্মে পেজের ডিটেইলস রেকর্ড করুন — প্রথমে Test।"},
+            {"৩", "Connected হলে বট চালু", "যাচাই শেষে Connected হবে। কানেকশন + চালু সাবস্ক্রিপশন থাকলেই বট চালু হবে।"},
+        };
+        for (String[] row : st) {
+            LinearLayout r = new LinearLayout(this);
+            r.setOrientation(LinearLayout.HORIZONTAL);
+            r.setGravity(Gravity.CENTER_VERTICAL);
+            r.setPadding(0, dp(6), 0, dp(6));
+            TextView num = new TextView(this);
+            num.setText(row[0]);
+            num.setTextSize(16);
+            num.setTypeface(Typeface.DEFAULT_BOLD);
+            num.setTextColor(Color.WHITE);
+            num.setGravity(Gravity.CENTER);
+            num.setBackground(rounded(PRIMARY, 20));
+            LinearLayout.LayoutParams nlp = new LinearLayout.LayoutParams(dp(36), dp(36));
+            r.addView(num, nlp);
+            LinearLayout tx = new LinearLayout(this);
+            tx.setOrientation(LinearLayout.VERTICAL);
+            tx.setPadding(dp(12), 0, 0, 0);
+            tx.addView(text(row[1], 15, TEXT, true));
+            tx.addView(text(row[2], 13, TEXT2, false));
+            r.addView(tx);
+            steps.addView(r);
+        }
+        content.addView(steps);
+        LinearLayout lim = card();
+        lim.setBackground(rounded(AMBER_SOFT, 20));
+        lim.addView(text("অন্য ব্যবসার পেজ স্বয়ংক্রিয়ভাবে কানেক্ট করা এই অ্যাপে নেই। এখানে পেজ রেকর্ড রাখা হয়, আর কানেকশন উপরের ধাপগুলো দিয়ে করা হয়।", 13, TEXT, false));
+        content.addView(lim);
+
+        content.addView(text("রেকর্ড করা কাস্টমার পেজ", 18, NAVY, true));
+        java.util.List<UsersStore.User> pages = new java.util.ArrayList<UsersStore.User>();
+        for (UsersStore.User u : users) {
+            if (!u.isAdminUser() && u.hasPage()) pages.add(u);
+        }
+        for (UsersStore.User lu : localPageRecords) pages.add(lu);
+        if (pages.isEmpty()) {
+            LinearLayout c = card();
+            c.addView(text("এখনো কোনো কাস্টমার পেজ রেকর্ড নেই", 16, TEXT, true));
+            c.addView(text("নিচের ফর্ম দিয়ে প্রথম পেজটি যোগ করুন।", 14, TEXT2, false));
+            content.addView(c);
+        } else {
+            for (final UsersStore.User u : pages) {
+                LinearLayout row = card();
+                LinearLayout top = new LinearLayout(this);
+                top.setOrientation(LinearLayout.HORIZONTAL);
+                top.setGravity(Gravity.CENTER_VERTICAL);
+                TextView nm = text(u.pageName.length() > 0 ? u.pageName : "নাম ছাড়া পেজ", 16, TEXT, true);
+                LinearLayout.LayoutParams mp = new LinearLayout.LayoutParams(
+                    0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f);
+                top.addView(nm, mp);
+                top.addView(chip(u.pageStatusBn(), u.localOnly ? AMBER_SOFT : GREEN_SOFT, u.localOnly ? AMBER : GREEN));
+                row.addView(top);
+                row.addView(text("কাস্টমার: " + u.name, 13, TEXT, false));
+                if (u.pageId.length() > 0) row.addView(text("Page ID: " + u.pageId, 12, TEXT2, false));
+                if (u.localOnly) row.addView(text(" শুধু এই সেশনে দেখা যাচ্ছে — সংরক্ষণ করা যায়নি।", 12, AMBER, true));
+                row.setBackground(rippleBackground());
+                row.setClickable(true);
+                row.setOnClickListener(new View.OnClickListener() {
+                    @Override public void onClick(View v) { currentCustomer = u; go(S_CUSTOMER_DETAIL, true); }
+                });
+                content.addView(row);
+            }
+        }
+        content.addView(primaryButton("＋ কাস্টমার পেজ যোগ করুন", new View.OnClickListener() {
+            @Override public void onClick(View v) { pendingPageUser = null; go(S_PAGE_FORM, true); }
+        }));
+    }
+
+    private void showPageForm() {
+        final UsersStore.User pre = pendingPageUser;
+        content.addView(ghostButton("পেজে ফিরুন", new View.OnClickListener() {
+            @Override public void onClick(View v) { go(S_PAGES, false); }
+        }));
+        content.addView(text("কাস্টমার পেজ রেকর্ড", 26, NAVY, true));
+        LinearLayout note = card();
+        note.setBackground(rounded(AMBER_SOFT, 20));
+        note.addView(text("পেজ ডিটেইলস কাস্টমারের রেকর্ডে সংরক্ষণ করা হয় (pageName / pageLink / pageId / pageStatus / pageNotes)।", 13, TEXT, false));
+        content.addView(note);
+
+        final EditText userIdInput = new EditText(this);
+        userIdInput.setHint("কাস্টমারের userId * (কাস্টমার তালিকা থেকে কপি করুন)");
+        userIdInput.setTextSize(15);
+        if (pre != null) userIdInput.setText(pre.id);
+        final EditText nameInput = new EditText(this);
+        nameInput.setHint("কাস্টমারের নাম");
+        nameInput.setTextSize(15);
+        if (pre != null) nameInput.setText(pre.name);
+        final EditText pageNameInput = new EditText(this);
+        pageNameInput.setHint("পেজের নাম *");
+        pageNameInput.setTextSize(15);
+        if (pre != null) pageNameInput.setText(pre.pageName);
+        final EditText pageLinkInput = new EditText(this);
+        pageLinkInput.setHint("পেজ লিংক (যেমন facebook.com/...)");
+        pageLinkInput.setTextSize(15);
+        if (pre != null) pageLinkInput.setText(pre.pageLink);
+        final EditText pageIdInput = new EditText(this);
+        pageIdInput.setHint("Page ID");
+        pageIdInput.setTextSize(15);
+        if (pre != null) pageIdInput.setText(pre.pageId);
+        final EditText notesInput = new EditText(this);
+        notesInput.setHint("নোট (ঐচ্ছিক)");
+        notesInput.setTextSize(15);
+        notesInput.setInputType(InputType.TYPE_CLASS_TEXT | InputType.TYPE_TEXT_FLAG_MULTI_LINE);
+        notesInput.setMinLines(2);
+        if (pre != null) notesInput.setText(pre.pageNotes);
+
+        LinearLayout form = card();
+        form.addView(text("পেজের তথ্য", 16, TEXT, true));
+        for (EditText e : new EditText[]{userIdInput, nameInput, pageNameInput, pageLinkInput, pageIdInput, notesInput}) {
+            e.setBackground(roundedBorder(SOFT, 12));
+            e.setPadding(dp(12), dp(10), dp(12), dp(10));
+            form.addView(e);
+        }
+        // Status selector: three tappable rows, selection kept in an
+        // array so the anonymous listeners can update it without a
+        // re-render (which would wipe the typed inputs).
+        final String[] sel = new String[]{(pre != null && pre.pageStatus.length() > 0) ? pre.pageStatus : "pending"};
+        final String[] keys = new String[]{"pending", "test", "connected"};
+        final String[] labels = new String[]{"অ্যাডমিন অ্যাক্সেস অপেক্ষমাণ", "টেস্ট পেজ", "কানেক্টেড"};
+        final TextView[] statusLabels = new TextView[3];
+        form.addView(text("কানেকশন স্ট্যাটাস", 15, TEXT, true));
+        for (int i = 0; i < 3; i++) {
+            final int idx = i;
+            LinearLayout rrow = new LinearLayout(this);
+            rrow.setOrientation(LinearLayout.HORIZONTAL);
+            rrow.setGravity(Gravity.CENTER_VERTICAL);
+            rrow.setPadding(0, dp(6), 0, dp(6));
+            final TextView lbl = text((sel[0].equals(keys[idx]) ? " " : "○ ") + labels[idx], 15,
+                sel[0].equals(keys[idx]) ? PRIMARY : TEXT, sel[0].equals(keys[idx]));
+            statusLabels[idx] = lbl;
+            rrow.addView(lbl);
+            rrow.setBackground(rippleBackground());
+            rrow.setClickable(true);
+            rrow.setOnClickListener(new View.OnClickListener() {
+                @Override public void onClick(View v) {
+                    sel[0] = keys[idx];
+                    for (int j = 0; j < 3; j++) {
+                        statusLabels[j].setText((sel[0].equals(keys[j]) ? " " : "○ ") + labels[j]);
+                        statusLabels[j].setTextColor(sel[0].equals(keys[j]) ? PRIMARY : TEXT);
+                        statusLabels[j].setTypeface(sel[0].equals(keys[j]) ? Typeface.DEFAULT_BOLD : Typeface.DEFAULT);
+                    }
+                }
+            });
+            form.addView(rrow);
+        }
+        content.addView(form);
+        content.addView(primaryButton("পেজ রেকর্ড সংরক্ষণ করুন", new View.OnClickListener() {
+            @Override public void onClick(View v) {
+                final String userId = userIdInput.getText().toString().trim();
+                final String custName = nameInput.getText().toString().trim();
+                final String pgName = pageNameInput.getText().toString().trim();
+                final String pgLink = pageLinkInput.getText().toString().trim();
+                final String pgId = pageIdInput.getText().toString().trim();
+                final String pgNotes = notesInput.getText().toString().trim();
+                if (userId.length() == 0) {
+                    Toast.makeText(MainActivity.this, "কাস্টমারের userId লিখুন।", Toast.LENGTH_SHORT).show();
+                    return;
+                }
+                UsersStore.User found = null;
+                for (UsersStore.User u : users) {
+                    if (userId.equals(u.id)) { found = u; break; }
+                }
+                final UsersStore.User target = found;
+                final java.util.Map<String, Object> fields = new java.util.HashMap<String, Object>();
+                fields.put("pageName", pgName);
+                fields.put("pageLink", pgLink);
+                fields.put("pageId", pgId);
+                fields.put("pageStatus", sel[0]);
+                fields.put("pageNotes", pgNotes);
+                if (target == null) {
+                    UsersStore.User rec = new UsersStore.User(userId,
+                        custName.length() > 0 ? custName : "কাস্টমার", "user", "",
+                        pgName, pgLink, pgId, sel[0], pgNotes);
+                    rec.localOnly = true;
+                    localPageRecords.add(rec);
+                    notice = "এই userId ব্যবহারকারীর তালিকায় পাওয়া যায়নি — রেকর্ডটি সংরক্ষণ করা যায়নি। সঠিক userId দিয়ে আবার চেষ্টা করুন।";
+                    go(S_PAGES, false);
+                    return;
+                }
+                FirebaseAuthHelper.updateUserPageFields(userId, fields,
+                    new FirebaseAuthHelper.ResultCallback<Boolean>() {
+                        @Override public void onSuccess(Boolean ok) {
+                            target.pageName = pgName;
+                            target.pageLink = pgLink;
+                            target.pageId = pgId;
+                            target.pageStatus = sel[0];
+                            target.pageNotes = pgNotes;
+                            target.localOnly = false;
+                            pendingPageUser = null;
+                            notice = "পেজ রেকর্ড সংরক্ষণ হয়েছে।";
+                            go(S_PAGES, false);
+                        }
+                        @Override public void onError(String message) {
+                            target.pageName = pgName;
+                            target.pageLink = pgLink;
+                            target.pageId = pgId;
+                            target.pageStatus = sel[0];
+                            target.pageNotes = pgNotes;
+                            target.localOnly = true;
+                            notice = "সংরক্ষণ করা যায়নি: " + message + " — রেকর্ডটি শুধু এই সেশনে দেখা যাচ্ছে।";
+                            go(S_PAGES, false);
+                        }
+                    });
+            }
+        }));
+    }
+
     private void showAbout() {
-        content.addView(ghostButton("← ফিরুন", new View.OnClickListener() {
+        content.addView(ghostButton("ফিরুন", new View.OnClickListener() {
             @Override public void onClick(View v) { onBackPressed(); }
         }));
         LinearLayout c = card();
-        c.addView(text("AutoMateIQ", 24, NAVY, true));
+        c.addView(text("AutoMateIQ", 26, NAVY, true));
         TextView d = text("AutoMate Your Business — Custom Bots, Seamless Interactions। এই অ্যাপ থেকে আপনার পেজের লিড, মেসেজ, সাবস্ক্রিপশন আর টোকেন — সব মোবাইল থেকে সহজে ম্যানেজ করা যায়।", 15, TEXT2, false);
         d.setPadding(0, dp(8), 0, 0);
         c.addView(d);
         content.addView(c);
         LinearLayout f = card();
-        f.addView(text("এই অ্যাপে যা আছে", 17, TEXT, true));
+        f.addView(text("এই অ্যাপে যা আছে", 16, TEXT, true));
         String[] feats = {"মোবাইল ড্যাশবোর্ড — লিড, হ্যান্ডওভার, বট রিপ্লাই",
             "লিড থ্রেড — অ্যাপ থেকেই রিপ্লাই, Take Over / Resume AI",
             "ফেসবুক কানেক্ট — পেজ কানেক্টের ধাপ",
             "মাসিক সাবস্ক্রিপশন + কত দিন বাকি",
             "এপিআই ক্রেডিট টোকেন রিচার্জ"};
         for (String feat : feats) {
-            TextView row = text("✓  " + feat, 14, TEXT, false);
+            TextView row = text("  " + feat, 14, TEXT, false);
             row.setPadding(0, dp(5), 0, 0);
             f.addView(row);
         }
         content.addView(f);
-        content.addView(outlineButton("ফেসবুক পেজ খুলুন", PRIMARY, new View.OnClickListener() {
-            @Override public void onClick(View v) { openUrl(LiveDataClient.PAGE_URL); }
-        }));
-        content.addView(outlineButton("ওয়েবসাইট খুলুন", PRIMARY, new View.OnClickListener() {
-            @Override public void onClick(View v) { openUrl(LiveDataClient.WEBSITE_URL); }
-        }));
-        TextView ver = text("ভার্সন 6.0 • ইন-অ্যাপ Firebase লগইন • ইন-অ্যাপ অর্ডার • লগইন কখনো ওয়েবসাইটে যাবে না", 12, TEXT2, false);
+        
+        
+        TextView ver = text("ভার্সন 8.0 • অ্যাডমিন প্যানেল / কাস্টমার প্যানেল আলাদা", 12, TEXT2, false);
         ver.setGravity(Gravity.CENTER);
         ver.setPadding(0, dp(8), 0, 0);
         content.addView(ver);

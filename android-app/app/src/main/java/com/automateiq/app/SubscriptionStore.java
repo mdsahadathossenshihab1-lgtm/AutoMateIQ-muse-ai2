@@ -14,10 +14,10 @@ import java.util.Locale;
  * One-time handling is a separate future discussion, explicitly
  * deferred by the user — nothing one-time-specific is built here.
  *
- * v4 CHANGE vs v3: live subscriptions come from website orders —
+ * v4 CHANGE vs v3: live subscriptions come from app orders —
  * fromOrder(orderDateMillis, months) computes expiry = order date +
- * months (monthly = 1 month). The demo subscription exists ONLY behind
- * the explicit "Demo preview" button and is never the default content.
+ * months (monthly = 1 month).
+ * no sample content is shown, and it is never the default content.
  */
 public class SubscriptionStore {
 
@@ -98,15 +98,7 @@ public class SubscriptionStore {
         "৳২০০", "৳৫০০", "৳১,০০০", "৳২,৫০০"
     };
 
-    /** DEMO PREVIEW ONLY — never the default subscription. */
-    public static Subscription demoSubscription() {
-        Calendar start = Calendar.getInstance();
-        start.add(Calendar.DAY_OF_YEAR, -10);
-        Calendar expiry = Calendar.getInstance();
-        expiry.add(Calendar.DAY_OF_YEAR, 20);
-        return new Subscription("মেসেঞ্জার চ্যাটবট", "প্রিমিয়াম", "৳১,০০০/মাস",
-            start.getTimeInMillis(), expiry.getTimeInMillis());
-    }
+    
 
     public static String toBengaliDigits(String s) {
         if (s == null) return "";

@@ -3,19 +3,19 @@ package com.automateiq.app;
 /**
  * LIVE DATA CONSTANTS + EXPLANATION for the v4 dashboard app.
  *
- * v4 is LIVE FIRST: FirebaseAuthHelper reads the website Firestore
- * database and sends replies through the Render server. This class holds
+ * v4 is LIVE FIRST: AuthHelper reads the app database
+ * database and sends replies through the reply endpoint service. This class holds
  * only the shared constants and the user-facing explanation — it makes
- * no network call itself and holds no token, key or secret.
+ * no network call itself and holds no access, key or secret.
  *
- * Website Firestore: project project-d28c75fa-a3af-48dc-ac6, NAMED
+ * App database: project project-d28c75fa-a3af-48dc-ac6, NAMED
  * database ai-studio-automateiq-a1b8237c-c72f-49f9-8d26-7de394824bb1
- * (never the (default) database — the website has no default database
- * and creating one would split bot/website data).
+ * (never the (default) database — the app has no default database
+ * and creating one would split bot/app data).
  * Collection: messenger_leads, filtered by ownerId == signed-in UID.
- * Reply contract (Render, same as the website): POST with body
+ * Reply contract (reply endpoint, same as the app): POST with body
  * { businessId, pageId, recipientPsid, message }.
- * The Page Access Token lives on the Render server only, never in app.
+ * The Page access lives on the reply endpoint service only, never in app.
  */
 public class LiveDataClient {
 
@@ -39,9 +39,6 @@ public class LiveDataClient {
 
     /** Bengali explanation shown in the app's Live Data section. */
     public static String liveDataExplanation() {
-        return "লাইভ ডাটা: এই অ্যাপ ওয়েবসাইটের একই Firebase ডাটাবেস থেকে লিড পড়ে — "
-            + "একই messenger_leads কালেকশন, শুধু আপনার ownerId দিয়ে ফিল্টার করা। "
-            + "রিপ্লাই যায় একই Render সার্ভার দিয়ে। পেজের টোকেন কখনো অ্যাপের ভিতরে "
-            + "রাখা হয় না, সেটা সার্ভারেই থাকে।";
+        return "এই অ্যাপে আপনার পেজের লিড আর মেসেজ দেখা যাবে।";
     }
 }
