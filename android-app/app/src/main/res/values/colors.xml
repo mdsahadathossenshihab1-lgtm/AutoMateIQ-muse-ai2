@@ -1,0 +1,26 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- AutoMateIQ v4 design system — colours taken from the AutoMateIQ website
+     (tailwind primary scale + slate text + violet/cyan/pink accents), NOT a
+     random blue. Website: primary #2563EB, deep navy #172554, text #0F172A,
+     secondary #64748B, light surface #EFF6FF, accents #8B5CF6 / #06B6D2. -->
+<resources>
+    <color name="primary">#2563EB</color>
+    <color name="primary_dark">#1E3A8A</color>
+    <color name="navy">#172554</color>
+    <color name="primary_light">#DBEAFE</color>
+    <color name="primary_soft">#EFF6FF</color>
+    <color name="violet">#8B5CF6</color>
+    <color name="cyan">#06B6D2</color>
+    <color name="bg">#F1F5F9</color>
+    <color name="surface">#FFFFFF</color>
+    <color name="text_primary">#0F172A</color>
+    <color name="text_secondary">#64748B</color>
+    <color name="border">#E2E8F0</color>
+    <color name="success">#16A34A</color>
+    <color name="success_soft">#DCFCE7</color>
+    <color name="warning">#D97706</color>
+    <color name="warning_soft">#FEF3C7</color>
+    <color name="danger">#DC2626</color>
+    <color name="danger_soft">#FEE2E2</color>
+    <color name="bot_bubble">#DBEAFE</color>
+</resources>
