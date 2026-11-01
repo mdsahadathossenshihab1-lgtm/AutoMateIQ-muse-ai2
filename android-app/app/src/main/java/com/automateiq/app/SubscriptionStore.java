@@ -6,7 +6,7 @@ import java.util.Date;
 import java.util.Locale;
 
 /**
- * Subscription model for the v3 dashboard app.
+ * Subscription model for the v4 dashboard app.
  *
  * A subscription here means ONLY a monthly package. One-time packages
  * are NOT subscriptions: they are never listed on the subscription
@@ -14,10 +14,10 @@ import java.util.Locale;
  * One-time handling is a separate future discussion, explicitly
  * deferred by the user — nothing one-time-specific is built here.
  *
- * DEMO DATA ONLY: the demo subscription below is clearly labelled
- * demo for UI testing. It is NOT a real customer's subscription.
- * Live status will come from website orders (order date + monthly
- * duration) when live data is connected (see LiveDataClient TODOs).
+ * v4 CHANGE vs v3: live subscriptions come from website orders —
+ * fromOrder(orderDateMillis, months) computes expiry = order date +
+ * months (monthly = 1 month). The demo subscription exists ONLY behind
+ * the explicit "Demo preview" button and is never the default content.
  */
 public class SubscriptionStore {
 
@@ -41,10 +41,6 @@ public class SubscriptionStore {
             return System.currentTimeMillis() <= expiryMillis;
         }
 
-        public String status() {
-            return isActive() ? "Active" : "Expired";
-        }
-
         public String statusBn() {
             return isActive() ? "চালু আছে" : "মেয়াদ শেষ";
         }
@@ -55,6 +51,25 @@ public class SubscriptionStore {
             if (diff <= 0) return 0;
             return diff / (24L * 60L * 60L * 1000L);
         }
+
+        /** 0-100 progress: how much of the subscription period has passed. */
+        public int progressPercent() {
+            long total = expiryMillis - startMillis;
+            if (total <= 0) return 100;
+            long elapsed = System.currentTimeMillis() - startMillis;
+            if (elapsed <= 0) return 0;
+            if (elapsed >= total) return 100;
+            return (int) (elapsed * 100 / total);
+        }
+    }
+
+    /** Live subscription from a website order: expiry = order date + months. */
+    public static Subscription fromOrder(String service, String pkg, String price,
+                                         long orderMillis, int months) {
+        Calendar expiry = Calendar.getInstance();
+        expiry.setTimeInMillis(orderMillis);
+        expiry.add(Calendar.MONTH, months);
+        return new Subscription(service, pkg, price, orderMillis, expiry.getTimeInMillis());
     }
 
     public static class MonthlyPackage {
@@ -83,20 +98,15 @@ public class SubscriptionStore {
         "৳২০০", "৳৫০০", "৳১,০০০", "৳২,৫০০"
     };
 
-    private Subscription demo;
-
-    public SubscriptionStore() {
-        // Demo subscription, relative to today so it stays Active in the demo:
-        // started 10 days ago, expires 20 days from today (30-day month).
+    /** DEMO PREVIEW ONLY — never the default subscription. */
+    public static Subscription demoSubscription() {
         Calendar start = Calendar.getInstance();
         start.add(Calendar.DAY_OF_YEAR, -10);
         Calendar expiry = Calendar.getInstance();
         expiry.add(Calendar.DAY_OF_YEAR, 20);
-        demo = new Subscription("মেসেঞ্জার চ্যাটবট", "প্রিমিয়াম", "৳১,০০০/মাস",
+        return new Subscription("মেসেঞ্জার চ্যাটবট", "প্রিমিয়াম", "৳১,০০০/মাস",
             start.getTimeInMillis(), expiry.getTimeInMillis());
     }
-
-    public Subscription demoSubscription() { return demo; }
 
     public static String toBengaliDigits(String s) {
         if (s == null) return "";
