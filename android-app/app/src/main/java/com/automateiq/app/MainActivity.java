@@ -8,13 +8,24 @@ import android.net.Uri;
 import android.os.Bundle;
 import android.view.Gravity;
 import android.view.View;
+import android.content.ClipData;
+import android.content.ClipboardManager;
+import android.content.Context;
 import android.widget.Button;
+import android.widget.EditText;
 import android.widget.LinearLayout;
 import android.widget.ScrollView;
 import android.widget.TextView;
+import android.widget.Toast;
 
 /**
- * AutoMateIQ native app v2.0 — fully native, custom UI, no embedded web content.
+ * AutoMateIQ mobile dashboard app v3.0 — fully native, custom UI, no embedded web content.
+ *
+ * v3 adds the website dashboard inside the app: Dashboard Home, Messenger
+ * Leads, Lead Thread with Reply / Take Over / Resume AI, Facebook Connect,
+ * and a Leads collection view. v3 runs on local demo leads (LeadsStore)
+ * so the mobile flow is testable; live data plugs in via LiveDataClient
+ * (TODO, not claimed as done).
  *
  * Flow (login-first, as requested):
  *   Launch -> Login screen ONLY. No landing page, no hero page, no services
@@ -43,6 +54,10 @@ public class MainActivity extends Activity {
 
     private String current = "login";
     private Service currentService = null;
+    private LeadsStore store = new LeadsStore();
+    private SubscriptionStore subStore = new SubscriptionStore();
+    private String leadFilter = "all";
+    private LeadsStore.Lead currentLead = null;
 
     private static class Service {
         String letter;
@@ -185,9 +200,17 @@ public class MainActivity extends Activity {
 
     @Override
     public void onBackPressed() {
-        if ("detail".equals(current) || "api".equals(current) || "about".equals(current)) {
+        if ("leadDetail".equals(current)) {
+            showLeads();
+        } else if ("detail".equals(current) || "api".equals(current)) {
             showHome();
-        } else if ("home".equals(current)) {
+        } else if ("subscriptions".equals(current) || "tokens".equals(current)
+                || "mySubscription".equals(current)) {
+            showDashboard();
+        } else if ("home".equals(current) || "leads".equals(current)
+                || "connect".equals(current) || "about".equals(current)) {
+            showDashboard();
+        } else if ("dashboard".equals(current)) {
             showLogin();
         } else {
             super.onBackPressed();
@@ -281,7 +304,7 @@ public class MainActivity extends Activity {
         nav.setOrientation(LinearLayout.HORIZONTAL);
         nav.setBackgroundColor(COLOR_WHITE);
         nav.setPadding(dp(8), dp(8), dp(8), dp(8));
-        String[] labels = new String[] { "হোম", "এপিআই ক্রেডিট", "সম্পর্কে", "লগআউট" };
+        String[] labels = new String[] { "ড্যাশবোর্ড", "লিডস", "কানেক্ট", "সার্ভিস", "সম্পর্কে" };
         for (int i = 0; i < labels.length; i++) {
             final int idx = i;
             Button b = new Button(this);
@@ -295,10 +318,11 @@ public class MainActivity extends Activity {
             b.setOnClickListener(new View.OnClickListener() {
                 @Override
                 public void onClick(View v) {
-                    if (idx == 0) showHome();
-                    else if (idx == 1) showApi();
-                    else if (idx == 2) showAbout();
-                    else showLogin();
+                    if (idx == 0) showDashboard();
+                    else if (idx == 1) showLeads();
+                    else if (idx == 2) showConnect();
+                    else if (idx == 3) showHome();
+                    else showAbout();
                 }
             });
             nav.addView(b);
@@ -362,7 +386,7 @@ public class MainActivity extends Activity {
                     // Login happens on the website system in the browser.
                     // After tapping, the app shows Home / services.
                     openBrowser(SITE_URL);
-                    showHome();
+                    showDashboard();
                 }
             });
         root.addView(loginBtn);
@@ -582,5 +606,409 @@ public class MainActivity extends Activity {
             }));
 
         showFrame(content, "সম্পর্কে");
+    }
+
+    // ---------- DASHBOARD HOME (after login) ----------
+
+    private void showDashboard() {
+        current = "dashboard";
+        LinearLayout content = new LinearLayout(this);
+        content.setOrientation(LinearLayout.VERTICAL);
+        content.setBackgroundColor(COLOR_BG);
+
+        LinearLayout demo = card();
+        demo.addView(text("ডেমো ডাটা দেখছেন — আসল কাস্টমার নয়", 15, COLOR_BLUE, true));
+        demo.addView(text("লাইভ ডাটা যুক্ত হলে এখানেই ওয়েবসাইটের আসল লিড আসবে।",
+            13, COLOR_MUTED, false));
+        content.addView(demo);
+
+        LinearLayout hero = card();
+        hero.addView(text("ড্যাশবোর্ড", 24, COLOR_DARK, true));
+        hero.addView(text("মোবাইল থেকে মেসেঞ্জার লিড দেখুন, রিপ্লাই দিন, হ্যান্ডওভার করুন।",
+            15, COLOR_MUTED, false));
+        content.addView(hero);
+
+        String[][] stats = new String[][] {
+            { "মোট লিড", String.valueOf(store.total()) },
+            { "হ্যান্ডওভার", String.valueOf(store.handoverCount()) },
+            { "বট রিপ্লাই", String.valueOf(store.botRepliedCount()) },
+            { "নতুন আজ", String.valueOf(store.newCount()) }
+        };
+        for (int i = 0; i < stats.length; i++) {
+            LinearLayout c = card();
+            c.addView(text(stats[i][0], 14, COLOR_MUTED, false));
+            c.addView(text(stats[i][1], 26, COLOR_DARK, true));
+            content.addView(c);
+        }
+
+        content.addView(button("লিডস দেখুন", COLOR_BLUE,
+            new View.OnClickListener() {
+                @Override public void onClick(View v) { showLeads(); }
+            }));
+        content.addView(button("ফেসবুক কানেক্ট", COLOR_BLUE,
+            new View.OnClickListener() {
+                @Override public void onClick(View v) { showConnect(); }
+            }));
+        content.addView(button("সার্ভিস দেখুন", COLOR_BLUE,
+            new View.OnClickListener() {
+                @Override public void onClick(View v) { showHome(); }
+            }));
+        content.addView(button("সাবস্ক্রিপশন কিনুন", COLOR_BLUE,
+            new View.OnClickListener() {
+                @Override public void onClick(View v) { showSubscriptions(); }
+            }));
+        content.addView(button("টোকেন কিনুন (এপিআই ক্রেডিট)", COLOR_BLUE,
+            new View.OnClickListener() {
+                @Override public void onClick(View v) { showTokens(); }
+            }));
+        content.addView(button("আমার সাবস্ক্রিপশন দেখুন", COLOR_BLUE,
+            new View.OnClickListener() {
+                @Override public void onClick(View v) { showMySubscription(); }
+            }));
+
+        SubscriptionStore.Subscription demoSub = subStore.demoSubscription();
+        LinearLayout subCard = card();
+        subCard.addView(text("আমার সাবস্ক্রিপশন (ডেমো)", 17, COLOR_TEXT, true));
+        subCard.addView(text(demoSub.service + " — " + demoSub.pkg, 16, COLOR_DARK, true));
+        subCard.addView(text("দাম: " + demoSub.price + "  •  স্ট্যাটাস: " + demoSub.statusBn(), 14, COLOR_TEXT, false));
+        subCard.addView(text("শুরু: " + SubscriptionStore.formatDate(demoSub.startMillis)
+            + "  •  শেষ: " + SubscriptionStore.formatDate(demoSub.expiryMillis), 14, COLOR_TEXT, false));
+        subCard.addView(text(SubscriptionStore.daysRemainingBn(demoSub), 18, COLOR_BLUE, true));
+        subCard.addView(text("ডেমো সাবস্ক্রিপশন — আসল কাস্টমারের নয়।", 13, COLOR_BLUE, true));
+        content.addView(subCard);
+
+        LinearLayout live = card();
+        live.addView(text("লাইভ ডাটা", 17, COLOR_TEXT, true));
+        live.addView(text(LiveDataClient.liveDataExplanation(), 14, COLOR_TEXT, false));
+        content.addView(live);
+
+        showFrame(content, "ড্যাশবোর্ড");
+    }
+
+    // ---------- LEADS LIST + COLLECTION ----------
+
+    private String statusLabel(LeadsStore.Lead l) {
+        if (l.paused) return "হ্যান্ডওভার";
+        if ("bot_replied".equals(l.status)) return "বট রিপ্লাই";
+        if ("new".equals(l.status)) return "নতুন";
+        return l.status;
+    }
+
+    private void showLeads() {
+        current = "leads";
+        LinearLayout content = new LinearLayout(this);
+        content.setOrientation(LinearLayout.VERTICAL);
+        content.setBackgroundColor(COLOR_BG);
+
+        LinearLayout demo = card();
+        demo.addView(text("ডেমো লিড — আসল কাস্টমার নয়", 15, COLOR_BLUE, true));
+        content.addView(demo);
+
+        LinearLayout filters = card();
+        filters.addView(text("ফিল্টার: " + ("all".equals(leadFilter) ? "সব" : "handover".equals(leadFilter) ? "হ্যান্ডওভার" : "বট রিপ্লাই"),
+            15, COLOR_TEXT, true));
+        filters.addView(text("বাটনে চাপ দিয়ে ফিল্টার বদলান:", 13, COLOR_MUTED, false));
+        content.addView(filters);
+        content.addView(button("সব লিড", COLOR_BLUE,
+            new View.OnClickListener() {
+                @Override public void onClick(View v) { leadFilter = "all"; showLeads(); }
+            }));
+        content.addView(button("শুধু হ্যান্ডওভার", COLOR_BLUE,
+            new View.OnClickListener() {
+                @Override public void onClick(View v) { leadFilter = "handover"; showLeads(); }
+            }));
+        content.addView(button("শুধু বট রিপ্লাই", COLOR_BLUE,
+            new View.OnClickListener() {
+                @Override public void onClick(View v) { leadFilter = "bot_replied"; showLeads(); }
+            }));
+
+        java.util.List<LeadsStore.Lead> list = store.filtered(leadFilter);
+        if (list.isEmpty()) {
+            LinearLayout e = card();
+            e.addView(text("এই ফিল্টারে কোনো লিড নেই।", 15, COLOR_MUTED, false));
+            content.addView(e);
+        }
+        for (int i = 0; i < list.size(); i++) {
+            final LeadsStore.Lead l = list.get(i);
+            LinearLayout c = card();
+            LinearLayout row = new LinearLayout(this);
+            row.setOrientation(LinearLayout.HORIZONTAL);
+            row.setGravity(Gravity.CENTER_VERTICAL);
+            TextView badge = text(l.initial(), 20, COLOR_WHITE, true);
+            badge.setGravity(Gravity.CENTER);
+            GradientDrawable bd = new GradientDrawable();
+            bd.setColor(l.paused ? 0xFFB45309 : COLOR_BLUE);
+            bd.setCornerRadius(dp(24));
+            badge.setBackground(bd);
+            badge.setPadding(dp(12), dp(12), dp(12), dp(12));
+            row.addView(badge);
+            LinearLayout info = new LinearLayout(this);
+            info.setOrientation(LinearLayout.VERTICAL);
+            info.setPadding(dp(12), 0, 0, 0);
+            info.addView(text(l.name, 17, COLOR_TEXT, true));
+            info.addView(text("পেজ: automateiq  •  " + statusLabel(l)
+                + (l.paused ? "  •  হ্যান্ডওভার ব্যাজ" : ""), 13, COLOR_MUTED, false));
+            info.addView(text(l.lastMessage, 14, COLOR_TEXT, false));
+            info.addView(text(l.updatedAt, 12, COLOR_MUTED, false));
+            row.addView(info);
+            c.addView(row);
+            c.setOnClickListener(new View.OnClickListener() {
+                @Override public void onClick(View v) { showLeadDetail(l); }
+            });
+            content.addView(c);
+        }
+
+        content.addView(button("সব লিডের সারাংশ কপি করুন (কালেকশন)", COLOR_GREEN,
+            new View.OnClickListener() {
+                @Override public void onClick(View v) {
+                    copyToClipboard(store.copyAllLeadsSummary());
+                    Toast.makeText(MainActivity.this, "লিড সারাংশ কপি হয়েছে", Toast.LENGTH_SHORT).show();
+                }
+            }));
+
+        showFrame(content, "লিডস");
+    }
+
+    private void copyToClipboard(String s) {
+        ClipboardManager cm = (ClipboardManager) getSystemService(Context.CLIPBOARD_SERVICE);
+        if (cm != null) cm.setPrimaryClip(ClipData.newPlainText("AutoMateIQ lead", s));
+    }
+
+    // ---------- LEAD DETAIL / THREAD ----------
+
+    private void showLeadDetail(final LeadsStore.Lead lead) {
+        current = "leadDetail";
+        currentLead = lead;
+        LinearLayout content = new LinearLayout(this);
+        content.setOrientation(LinearLayout.VERTICAL);
+        content.setBackgroundColor(COLOR_BG);
+
+        LinearLayout head = card();
+        head.addView(text(lead.name, 22, COLOR_DARK, true));
+        head.addView(text("পেজ: automateiq  •  স্ট্যাটাস: " + statusLabel(lead)
+            + (lead.paused ? "  •  বট পজ করা আছে" : ""), 14, COLOR_MUTED, false));
+        head.addView(text("ডেমো লিড — আসল কাস্টমার নয়", 13, COLOR_BLUE, true));
+        content.addView(head);
+
+        for (int i = 0; i < lead.messages.size(); i++) {
+            LeadsStore.Message m = lead.messages.get(i);
+            String who;
+            if ("user".equals(m.role)) who = "কাস্টমার";
+            else if ("bot".equals(m.role)) who = "বট";
+            else if ("owner".equals(m.role)) who = "আপনি (ওনার)";
+            else who = "কাস্টমার";
+            LinearLayout c = card();
+            c.addView(text(who + "  •  " + m.createdAt, 13, COLOR_MUTED, true));
+            c.addView(text(m.text, 15, COLOR_TEXT, false));
+            content.addView(c);
+        }
+
+        LinearLayout replyBox = card();
+        replyBox.addView(text("রিপ্লাই লিখুন", 17, COLOR_TEXT, true));
+        final EditText input = new EditText(this);
+        input.setHint("মেসেজ লিখুন...");
+        input.setTextSize(15);
+        replyBox.addView(input);
+        content.addView(replyBox);
+        content.addView(button("রিপ্লাই পাঠান", COLOR_BLUE,
+            new View.OnClickListener() {
+                @Override public void onClick(View v) {
+                    String t = input.getText().toString().trim();
+                    if (t.length() == 0) {
+                        Toast.makeText(MainActivity.this, "আগে মেসেজ লিখুন", Toast.LENGTH_SHORT).show();
+                        return;
+                    }
+                    store.appendOwnerReply(lead, t);
+                    Toast.makeText(MainActivity.this, "রিপ্লাই থ্রেডে যোগ হয়েছে (ডেমো ডাটা)", Toast.LENGTH_SHORT).show();
+                    showLeadDetail(lead);
+                }
+            }));
+        content.addView(button("Take Over (বট বন্ধ করুন)", 0xFFB45309,
+            new View.OnClickListener() {
+                @Override public void onClick(View v) {
+                    store.takeOver(lead);
+                    Toast.makeText(MainActivity.this, "Take Over হয়েছে — বট এই লিডে আর উত্তর দেবে না", Toast.LENGTH_SHORT).show();
+                    showLeadDetail(lead);
+                }
+            }));
+        content.addView(button("Resume AI (বট আবার চালু করুন)", COLOR_GREEN,
+            new View.OnClickListener() {
+                @Override public void onClick(View v) {
+                    store.resumeAi(lead);
+                    Toast.makeText(MainActivity.this, "Resume AI হয়েছে — বট আবার উত্তর দেবে", Toast.LENGTH_SHORT).show();
+                    showLeadDetail(lead);
+                }
+            }));
+        content.addView(button("লিড ডিটেইলস কপি করুন", COLOR_BLUE,
+            new View.OnClickListener() {
+                @Override public void onClick(View v) {
+                    copyToClipboard(store.copyLeadDetails(lead));
+                    Toast.makeText(MainActivity.this, "লিড ডিটেইলস কপি হয়েছে", Toast.LENGTH_SHORT).show();
+                }
+            }));
+
+        showFrame(content, "লিড");
+    }
+
+    // ---------- FACEBOOK CONNECT ----------
+
+    private void showConnect() {
+        current = "connect";
+        LinearLayout content = new LinearLayout(this);
+        content.setOrientation(LinearLayout.VERTICAL);
+        content.setBackgroundColor(COLOR_BG);
+
+        LinearLayout c = card();
+        c.addView(text("ফেসবুক কানেক্ট", 22, COLOR_DARK, true));
+        c.addView(text("অ্যাপ থেকে ফেসবুক পেজ কানেক্ট করার ধাপ:", 15, COLOR_TEXT, false));
+        content.addView(c);
+
+        LinearLayout steps = card();
+        steps.addView(text("১. ব্রাউজারে ফেসবুকে লগইন করুন", 15, COLOR_TEXT, false));
+        steps.addView(text("২. আপনার পেজটি বেছে নিন", 15, COLOR_TEXT, false));
+        steps.addView(text("৩. মেসেঞ্জার পারমিশন দিন (পেজ মেসেজ পড়া ও পাঠানো)", 15, COLOR_TEXT, false));
+        steps.addView(text("৪. কানেক্ট শেষ হলে অ্যাপের ড্যাশবোর্ডে লিড আসবে", 15, COLOR_TEXT, false));
+        content.addView(steps);
+
+        LinearLayout safe = card();
+        safe.addView(text("নিরাপত্তা — গুরুত্বপূর্ণ", 17, COLOR_TEXT, true));
+        safe.addView(text("পেজের টোকেন অ্যাপের ভিতরে রাখা হয় না এবং অ্যাপে দেখানোও হয় না। "
+            + "টোকেন সার্ভারে (Render বট সার্ভারে) থাকে, অ্যাপ শুধু সার্ভারের মাধ্যমে মেসেজ দেখে ও পাঠায়। "
+            + "এই ভার্সনে অ্যাপের ভিতরে সরাসরি ফেসবুক লগইন + টোকেন নেওয়া নেই — "
+            + "সেটা করতে Meta-র App Review ও Business Verification লাগে, তাই সেটা পরের ধাপ।",
+            14, COLOR_TEXT, false));
+        content.addView(safe);
+
+        content.addView(button("ফেসবুক পেজ খুলুন (ব্রাউজারে)", COLOR_BLUE,
+            new View.OnClickListener() {
+                @Override public void onClick(View v) { openBrowser(PAGE_URL); }
+            }));
+        content.addView(button("ওয়েবসাইট অ্যাডমিন প্যানেল খুলুন (ব্রাউজারে)", COLOR_BLUE,
+            new View.OnClickListener() {
+                @Override public void onClick(View v) { openBrowser(SITE_URL); }
+            }));
+
+        LinearLayout live = card();
+        live.addView(text("লাইভ ডাটা", 17, COLOR_TEXT, true));
+        live.addView(text(LiveDataClient.liveDataExplanation(), 14, COLOR_TEXT, false));
+        content.addView(live);
+
+        showFrame(content, "কানেক্ট");
+    }
+
+    // ---------- SUBSCRIPTION PURCHASE (monthly packages only) ----------
+
+    private void showSubscriptions() {
+        current = "subscriptions";
+        LinearLayout content = new LinearLayout(this);
+        content.setOrientation(LinearLayout.VERTICAL);
+        content.setBackgroundColor(COLOR_BG);
+
+        LinearLayout head = card();
+        head.addView(text("সাবস্ক্রিপশন কিনুন", 22, COLOR_DARK, true));
+        head.addView(text("শুধু মাসিক প্যাকেজ। প্রতিটি প্যাকেজের মেয়াদ ১ মাস। "
+            + "ট্রায়াল ও এককালীন প্যাকেজ এখানে সাবস্ক্রিপশন হিসেবে দেখানো হয় না।",
+            14, COLOR_MUTED, false));
+        content.addView(head);
+
+        for (int i = 0; i < SubscriptionStore.MONTHLY_PACKAGES.length; i++) {
+            final SubscriptionStore.MonthlyPackage mp = SubscriptionStore.MONTHLY_PACKAGES[i];
+            LinearLayout c = card();
+            c.addView(text(mp.service + " — " + mp.pkg, 17, COLOR_TEXT, true));
+            c.addView(text("দাম: " + mp.price, 15, COLOR_BLUE, true));
+            c.addView(text("মেয়াদ: ১ মাস", 14, COLOR_TEXT, false));
+            content.addView(c);
+            content.addView(button("কিনুন / ওয়েবসাইট থেকে অর্ডার করুন — " + mp.service + " " + mp.pkg, COLOR_BLUE,
+                new View.OnClickListener() {
+                    @Override public void onClick(View v) { openBrowser(SITE_URL); }
+                }));
+        }
+
+        LinearLayout note = card();
+        note.addView(text("অর্ডার ওয়েবসাইটের সিস্টেম দিয়ে হবে, তাই আপনার তথ্য এক জায়গায় থাকে।",
+            14, COLOR_MUTED, false));
+        content.addView(note);
+
+        showFrame(content, "সাবস্ক্রিপশন");
+    }
+
+    // ---------- TOKEN PURCHASE (API Credit Wallet) ----------
+
+    private void showTokens() {
+        current = "tokens";
+        LinearLayout content = new LinearLayout(this);
+        content.setOrientation(LinearLayout.VERTICAL);
+        content.setBackgroundColor(COLOR_BG);
+
+        LinearLayout head = card();
+        head.addView(text("টোকেন কিনুন — এপিআই ক্রেডিট", 22, COLOR_DARK, true));
+        head.addView(text("৳২০০ থেকে শুরু। যত টাকার এপিআই চান নিতে পারবেন।",
+            15, COLOR_MUTED, false));
+        content.addView(head);
+
+        for (int i = 0; i < SubscriptionStore.TOKEN_AMOUNTS.length; i++) {
+            final String amt = SubscriptionStore.TOKEN_AMOUNTS[i];
+            LinearLayout c = card();
+            c.addView(text("রিচার্জ: " + amt, 18, COLOR_BLUE, true));
+            content.addView(c);
+            content.addView(button("কিনুন / ওয়েবসাইট থেকে রিচার্জ করুন — " + amt, COLOR_BLUE,
+                new View.OnClickListener() {
+                    @Override public void onClick(View v) { openBrowser(SITE_URL); }
+                }));
+        }
+
+        LinearLayout rules = card();
+        rules.addView(text("নিয়ম", 17, COLOR_TEXT, true));
+        rules.addView(text("•  পেমেন্ট: বিকাশ / নগদ (পার্সোনাল)", 15, COLOR_TEXT, false));
+        rules.addView(text("•  মেয়াদ শেষ হয় না", 15, COLOR_TEXT, false));
+        rules.addView(text("•  Pay As You Go", 15, COLOR_TEXT, false));
+        rules.addView(text("•  রিচার্জ অ্যাডমিন অনুমোদন করলে যোগ হয়", 15, COLOR_TEXT, false));
+        rules.addView(text("•  সর্বনিম্ন ৳২০০, এর বেশি যেকোনো অ্যামাউন্ট নেওয়া যায়", 15, COLOR_TEXT, false));
+        rules.addView(text("•  প্রতি-মেসেজ রেট সাইটে দেওয়া নেই, তাই এখানে কোনো রেট দেওয়া হয়নি",
+            15, COLOR_TEXT, false));
+        content.addView(rules);
+
+        showFrame(content, "টোকেন");
+    }
+
+    // ---------- MY SUBSCRIPTION STATUS ----------
+
+    private void showMySubscription() {
+        current = "mySubscription";
+        LinearLayout content = new LinearLayout(this);
+        content.setOrientation(LinearLayout.VERTICAL);
+        content.setBackgroundColor(COLOR_BG);
+
+        SubscriptionStore.Subscription sub = subStore.demoSubscription();
+        LinearLayout head = card();
+        head.addView(text("আমার সাবস্ক্রিপশন", 22, COLOR_DARK, true));
+        head.addView(text("ডেমো সাবস্ক্রিপশন — আসল কাস্টমারের নয়।", 14, COLOR_BLUE, true));
+        content.addView(head);
+
+        LinearLayout c = card();
+        c.addView(text("সার্ভিস: " + sub.service, 17, COLOR_TEXT, true));
+        c.addView(text("প্যাকেজ: " + sub.pkg, 17, COLOR_TEXT, true));
+        c.addView(text("দাম: " + sub.price, 15, COLOR_BLUE, true));
+        c.addView(text("শুরুর তারিখ: " + SubscriptionStore.formatDate(sub.startMillis), 15, COLOR_TEXT, false));
+        c.addView(text("শেষের তারিখ: " + SubscriptionStore.formatDate(sub.expiryMillis), 15, COLOR_TEXT, false));
+        c.addView(text("স্ট্যাটাস: " + sub.statusBn(), 15, COLOR_TEXT, false));
+        c.addView(text(SubscriptionStore.daysRemainingBn(sub), 20, COLOR_BLUE, true));
+        content.addView(c);
+
+        LinearLayout live = card();
+        live.addView(text("লাইভ স্ট্যাটাস", 17, COLOR_TEXT, true));
+        live.addView(text("লাইভ সাবস্ক্রিপশন স্ট্যাটাস এখনো যুক্ত হয়নি। "
+            + "লাইভ হলে ওয়েবসাইটের অর্ডার থেকে আসবে — অর্ডারের তারিখ + মাসিক মেয়াদ (১ মাস) "
+            + "দিয়ে শুরুর তারিখ, শেষের তারিখ ও দিন বাকি হিসাব করে এখানে দেখানো হবে। "
+            + "এককালীন প্যাকেজের জন্য দিন বাকি দেখানো হবে না — সেটা পরে আলাদাভাবে আলোচনা করে ঠিক করা হবে।",
+            14, COLOR_TEXT, false));
+        content.addView(live);
+
+        content.addView(button("সাবস্ক্রিপশন কিনুন", COLOR_BLUE,
+            new View.OnClickListener() {
+                @Override public void onClick(View v) { showSubscriptions(); }
+            }));
+
+        showFrame(content, "সাবস্ক্রিপশন");
     }
 }
