@@ -26,10 +26,18 @@ public class LeadsStore {
         public String role;
         public String text;
         public String createdAt;
+        // v5 SEND STATUS: "" = historic/unknown, "sending" | "sent" | "failed".
+        // Only owner messages ever carry a status; customer/bot messages
+        // keep "" and show no status line.
+        public String sendStatus;
         public Message(String role, String text, String createdAt) {
+            this(role, text, createdAt, "");
+        }
+        public Message(String role, String text, String createdAt, String sendStatus) {
             this.role = role;
             this.text = text;
             this.createdAt = createdAt;
+            this.sendStatus = sendStatus == null ? "" : sendStatus;
         }
     }
 
@@ -102,11 +110,34 @@ public class LeadsStore {
         return n;
     }
 
-    /** Owner replies from the app: appends to the thread and updates the lead. */
+    /**
+     * Owner replies from the app: appends to the thread, updates the lead,
+     * AND auto-pauses the bot (paused=true, status=handover). v5 FIX: v4
+     * left the bot active after an owner reply, so the bot could double-
+     * reply and the website never flipped to Handover. An owner reply is
+     * a Take Over by definition.
+     */
     public void appendOwnerReply(Lead lead, String replyText) {
-        lead.messages.add(new Message("owner", replyText, "এখন"));
+        lead.messages.add(new Message("owner", replyText, "এখন", "sent"));
         lead.lastMessage = replyText;
         lead.updatedAt = "এখন";
+        lead.paused = true;
+        lead.status = "handover";
+    }
+
+    /**
+     * v5 send flow: add the owner message immediately in "sending" state
+     * (so it is visible at the bottom at once), already paused. The caller
+     * flips sendStatus to "sent" or "failed" when the server answers.
+     */
+    public Message addSendingOwnerMessage(Lead lead, String replyText) {
+        Message m = new Message("owner", replyText, "এখন", "sending");
+        lead.messages.add(m);
+        lead.lastMessage = replyText;
+        lead.updatedAt = "এখন";
+        lead.paused = true;
+        lead.status = "handover";
+        return m;
     }
 
     /** Take Over: bot stops for this lead (paused=true, status=handover). */

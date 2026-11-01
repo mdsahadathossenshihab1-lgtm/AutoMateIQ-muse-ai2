@@ -7,7 +7,9 @@ import android.content.Context;
 import android.content.Intent;
 import android.graphics.Color;
 import android.graphics.Typeface;
+import android.content.res.ColorStateList;
 import android.graphics.drawable.GradientDrawable;
+import android.graphics.drawable.RippleDrawable;
 import android.net.Uri;
 import android.os.Bundle;
 import android.text.InputType;
@@ -25,7 +27,17 @@ import java.util.ArrayList;
 import java.util.List;
 
 /**
- * AutoMateIQ Mobile Dashboard v4.0 — COMPLETE UI/UX OVERHAUL.
+ * AutoMateIQ Mobile Dashboard v5.0 — CHAT UX FIX + PROFESSIONAL SHELL + SMALLER SIZE.
+ *
+ * v5 FIXES THE v4 CHAT BUG (user feedback 2026-11-01 22:47): v4 put the WHOLE
+ * app in ONE ScrollView and render() scrolled to top, so a thread opened at
+ * the OLDEST message, the composer sat below all messages, and after send
+ * the view jumped to top again so the sent message was invisible. v5 does
+ * NOT do that: the thread has its OWN ScrollView, a PINNED bottom composer,
+ * opens at the LATEST message, and stays at the bottom after send.
+ * Owner replies also auto-pause the bot now (paused=true, status=handover,
+ * written to Firestore too), so the bot cannot double-reply.
+ * No WebView anywhere. No phone number or email is shown anywhere.
  *
  * What changed vs v3 (the design the user rejected as "একদম বাজে"):
  * - A real design system, taken from the AutoMateIQ website palette
@@ -91,6 +103,15 @@ public class MainActivity extends Activity {
     private ScrollView scroll;
     private LinearLayout content;
     private LinearLayout bottomNav;
+    // v5 THREAD SHELL: the thread screen does NOT live inside the main
+    // ScrollView. threadPane is a separate vertical layout: header (fixed),
+    // threadScroll (its own ScrollView, weight 1), composer (fixed, pinned
+    // at the bottom). This is what makes "open at latest message" and
+    // "composer never scrolls away" possible.
+    private LinearLayout threadPane;
+    private ScrollView threadScroll;
+    private LinearLayout threadMessages;
+    private EditText threadInput;
 
     private int screen = S_LOGIN;
     private List<Integer> backStack = new ArrayList<Integer>();
@@ -279,6 +300,7 @@ public class MainActivity extends Activity {
         topBar = new LinearLayout(this);
         topBar.setOrientation(LinearLayout.HORIZONTAL);
         topBar.setBackgroundColor(SURFACE);
+        topBar.setElevation(dp(4));
         topBar.setPadding(dp(16), dp(12), dp(16), dp(12));
         topBar.setGravity(Gravity.CENTER_VERTICAL);
         root.addView(topBar, new LinearLayout.LayoutParams(
@@ -293,9 +315,19 @@ public class MainActivity extends Activity {
         root.addView(scroll, new LinearLayout.LayoutParams(
             ViewGroup.LayoutParams.MATCH_PARENT, 0, 1f));
 
+        // v5: thread pane (hidden except on S_LEAD_DETAIL). Same weight as
+        // the main scroll area, so the composer sits at the screen bottom.
+        threadPane = new LinearLayout(this);
+        threadPane.setOrientation(LinearLayout.VERTICAL);
+        threadPane.setBackgroundColor(BG);
+        threadPane.setVisibility(View.GONE);
+        root.addView(threadPane, new LinearLayout.LayoutParams(
+            ViewGroup.LayoutParams.MATCH_PARENT, 0, 1f));
+
         bottomNav = new LinearLayout(this);
         bottomNav.setOrientation(LinearLayout.HORIZONTAL);
         bottomNav.setBackgroundColor(SURFACE);
+        bottomNav.setElevation(dp(8));
         bottomNav.setPadding(dp(8), dp(8), dp(8), dp(8));
         root.addView(bottomNav, new LinearLayout.LayoutParams(
             ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT));
@@ -320,7 +352,7 @@ public class MainActivity extends Activity {
         titles.setOrientation(LinearLayout.VERTICAL);
         titles.setPadding(dp(10), 0, 0, 0);
         TextView t = text("AutoMateIQ", 18, TEXT, true);
-        TextView s = text("মোবাইল ড্যাশবোর্ড • v4.0", 12, TEXT2, false);
+        TextView s = text("মোবাইল ড্যাশবোর্ড • v5.0", 12, TEXT2, false);
         titles.addView(t);
         titles.addView(s);
         LinearLayout.LayoutParams tp = new LinearLayout.LayoutParams(0,
@@ -367,6 +399,7 @@ public class MainActivity extends Activity {
                 || (target == S_LEADS && (screen == S_LEAD_DETAIL))
                 || (target == S_SUBS && (screen == S_MY_SUB || screen == S_TOKENS));
             if (selected) item.setBackground(rounded(SOFT_BLUE, 14));
+            else item.setBackground(rippleBackground());
             TextView icon = new TextView(this);
             icon.setText(it[0]);
             icon.setTextSize(18);
@@ -391,6 +424,17 @@ public class MainActivity extends Activity {
     private void render() {
         renderTopBar();
         renderBottomNav();
+        if (screen == S_LEAD_DETAIL) {
+            // v5 THREAD: never touch the main ScrollView here. The thread
+            // renders into threadPane and lands on the LATEST message.
+            // scroll.scrollTo(0, 0) is deliberately NOT called for threads.
+            scroll.setVisibility(View.GONE);
+            threadPane.setVisibility(View.VISIBLE);
+            renderThreadScreen();
+            return;
+        }
+        threadPane.setVisibility(View.GONE);
+        scroll.setVisibility(View.VISIBLE);
         content.removeAllViews();
         scroll.scrollTo(0, 0);
         if (notice != null) {
@@ -402,7 +446,8 @@ public class MainActivity extends Activity {
             case S_PENDING: showPending(); break;
             case S_DASH: showDashboard(); break;
             case S_LEADS: showLeads(); break;
-            case S_LEAD_DETAIL: showLeadDetail(); break;
+            // S_LEAD_DETAIL is handled before the switch in render()
+            // (threadPane, not the main ScrollView) — never reaches here.
             case S_CONNECT: showConnect(); break;
             case S_SERVICES: showServices(); break;
             case S_SERVICE_DETAIL: showServiceDetail(); break;
@@ -454,7 +499,7 @@ public class MainActivity extends Activity {
         LinearLayout c = new LinearLayout(this);
         c.setOrientation(LinearLayout.VERTICAL);
         c.setBackground(rounded(SURFACE, 20));
-        c.setElevation(dp(2));
+        c.setElevation(dp(3));
         c.setPadding(dp(16), dp(16), dp(16), dp(16));
         LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(
             ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT);
@@ -580,6 +625,14 @@ public class MainActivity extends Activity {
         LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(dp(48), dp(48));
         a.setLayoutParams(lp);
         return a;
+    }
+
+    // v5 PROFESSIONAL SHELL: a real Material-style ripple on tappable
+    // rows, so taps feel like a commercial app instead of a dead layout.
+    private RippleDrawable rippleBackground() {
+        int[][] states = new int[][]{new int[]{}};
+        int[] colors = new int[]{0x1F2563EB};
+        return new RippleDrawable(new ColorStateList(states, colors), null, null);
     }
 
     private LinearLayout progressBar(int percent) {
@@ -877,6 +930,8 @@ public class MainActivity extends Activity {
             0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f);
         row.addView(mid, mp);
         row.addView(statusChip(lead));
+        row.setBackground(rippleBackground());
+        row.setClickable(true);
         row.setOnClickListener(new View.OnClickListener() {
             @Override public void onClick(View v) {
                 currentLead = lead;
@@ -970,18 +1025,57 @@ public class MainActivity extends Activity {
         }
     }
 
-    // ---- Screens: Lead Detail / Thread ----
-    private void showLeadDetail() {
+    // ---- v5 THREAD SCREEN: fixed header + own ScrollView + pinned composer ----
+    private void scrollToThreadBottom() {
+        // Post twice: once after layout, once after the messages are drawn,
+        // so the thread reliably lands on the LATEST message, not the top.
+        if (threadScroll == null) return;
+        threadScroll.post(new Runnable() {
+            @Override public void run() {
+                threadScroll.fullScroll(View.FOCUS_DOWN);
+                threadScroll.post(new Runnable() {
+                    @Override public void run() {
+                        threadScroll.fullScroll(View.FOCUS_DOWN);
+                    }
+                });
+            }
+        });
+    }
+
+    private void renderThreadScreen() {
         final LeadsStore.Lead lead = currentLead;
         if (lead == null) { go(S_LEADS, false); return; }
-        content.addView(ghostButton("← লিডসে ফিরুন", new View.OnClickListener() {
-            @Override public void onClick(View v) { go(S_LEADS, false); }
-        }));
+        threadPane.removeAllViews();
+        if (notice != null) {
+            threadPane.addView(noticeCard(notice));
+            notice = null;
+        }
 
+        // Fixed header: back + name + status. Never scrolls away.
         LinearLayout head = card();
+        LinearLayout topRow = new LinearLayout(this);
+        topRow.setOrientation(LinearLayout.HORIZONTAL);
+        topRow.setGravity(Gravity.CENTER_VERTICAL);
+        TextView back = new TextView(this);
+        back.setText("← ফিরুন");
+        back.setTextSize(14);
+        back.setTypeface(Typeface.DEFAULT_BOLD);
+        back.setTextColor(PRIMARY);
+        back.setPadding(dp(4), dp(6), dp(12), dp(6));
+        back.setOnClickListener(new View.OnClickListener() {
+            @Override public void onClick(View v) { go(S_LEADS, false); }
+        });
+        topRow.addView(back);
+        LinearLayout.LayoutParams sp = new LinearLayout.LayoutParams(
+            0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f);
+        TextView spacer = new TextView(this);
+        topRow.addView(spacer, sp);
+        topRow.addView(statusChip(lead));
+        head.addView(topRow);
         LinearLayout hrow = new LinearLayout(this);
         hrow.setOrientation(LinearLayout.HORIZONTAL);
         hrow.setGravity(Gravity.CENTER_VERTICAL);
+        hrow.setPadding(0, dp(10), 0, 0);
         hrow.addView(avatar(lead.initial(), lead.paused ? AMBER : PRIMARY));
         LinearLayout mid = new LinearLayout(this);
         mid.setOrientation(LinearLayout.VERTICAL);
@@ -991,36 +1085,54 @@ public class MainActivity extends Activity {
         LinearLayout.LayoutParams mp = new LinearLayout.LayoutParams(
             0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f);
         hrow.addView(mid, mp);
-        hrow.addView(statusChip(lead));
         head.addView(hrow);
-        content.addView(head);
+        // Take Over / Resume AI lives in the header so the state is visible
+        // the moment the thread opens — no scrolling needed to find it.
+        head.addView(outlineButton(lead.paused ? "▶ Resume AI (বট আবার চালু করুন)"
+                : "⏸ Take Over (বট থামিয়ে নিজে উত্তর দিন)",
+            lead.paused ? GREEN : AMBER, new View.OnClickListener() {
+                @Override public void onClick(View v) {
+                    toggleLeadPause(lead);
+                }
+            }));
+        head.addView(ghostButton("📋 লিড ডিটেইলস কপি করুন",
+            new View.OnClickListener() {
+                @Override public void onClick(View v) {
+                    copyText("lead", leadsStore.copyLeadDetails(lead));
+                }
+            }));
+        threadPane.addView(head);
 
-        LinearLayout thread = card();
-        thread.addView(text("কথোপকথন", 16, TEXT, true));
+        // Messages area: its OWN ScrollView. This is the v5 fix — messages
+        // scroll inside here, the header and composer stay put.
+        threadScroll = new ScrollView(this);
+        threadMessages = new LinearLayout(this);
+        threadMessages.setOrientation(LinearLayout.VERTICAL);
+        threadMessages.setPadding(dp(16), dp(8), dp(16), dp(8));
         if (lead.messages.isEmpty()) {
-            TextView e = text("এই লিডের এখনো কোনো মেসেজ দেখা যাচ্ছে না।", 14, TEXT2, false);
-            e.setPadding(0, dp(8), 0, 0);
-            thread.addView(e);
+            LinearLayout empty = card();
+            empty.addView(text("এই লিডের এখনো কোনো মেসেজ দেখা যাচ্ছে না। নিচে লিখে প্রথম রিপ্লাই পাঠান।", 14, TEXT2, false));
+            threadMessages.addView(empty);
         }
-        for (LeadsStore.Message m : lead.messages) {
+        for (final LeadsStore.Message m : lead.messages) {
             boolean isOwner = "owner".equals(m.role);
             boolean isBot = "bot".equals(m.role);
             String roleLabel = isOwner ? "আপনি (ওনার)" : isBot ? "বট" : "কাস্টমার";
             LinearLayout wrap = new LinearLayout(this);
             wrap.setOrientation(LinearLayout.VERTICAL);
-            wrap.setPadding(isOwner || isBot ? dp(48) : 0, dp(6), (isOwner || isBot) ? 0 : dp(48), 0);
+            wrap.setPadding(isOwner || isBot ? dp(48) : 0, dp(6),
+                (isOwner || isBot) ? 0 : dp(48), 0);
             TextView role = text(roleLabel, 11, TEXT2, true);
             role.setGravity((isOwner || isBot) ? Gravity.END : Gravity.START);
             wrap.addView(role);
             TextView bubble = new TextView(this);
             bubble.setText(m.text);
             bubble.setTextSize(15);
-            bubble.setTextColor((isOwner) ? Color.WHITE : TEXT);
+            bubble.setTextColor(isOwner ? Color.WHITE : TEXT);
             bubble.setPadding(dp(14), dp(10), dp(14), dp(10));
             bubble.setBackground(rounded(isOwner ? PRIMARY : isBot ? SOFT_BLUE : SURFACE, 16));
             if (!isOwner && !isBot) {
-                GradientDrawable d = roundedBorder(SURFACE, 16);
-                bubble.setBackground(d);
+                bubble.setBackground(roundedBorder(SURFACE, 16));
             }
             bubble.setGravity((isOwner || isBot) ? Gravity.END : Gravity.START);
             wrap.addView(bubble);
@@ -1029,87 +1141,172 @@ public class MainActivity extends Activity {
                 ts.setGravity((isOwner || isBot) ? Gravity.END : Gravity.START);
                 wrap.addView(ts);
             }
-            thread.addView(wrap);
+            // v5 SEND STATUS: unmistakable, under every owner bubble.
+            // Historic owner messages (sendStatus empty) show nothing.
+            if (isOwner && m.sendStatus != null && m.sendStatus.length() > 0) {
+                if ("sending".equals(m.sendStatus)) {
+                    TextView st = text("⏳ পাঠানো হচ্ছে…", 12, TEXT2, true);
+                    st.setGravity(Gravity.END);
+                    wrap.addView(st);
+                } else if ("sent".equals(m.sendStatus)) {
+                    TextView st = text("✓ Messenger-এ পাঠানো হয়েছে", 12, GREEN, true);
+                    st.setGravity(Gravity.END);
+                    wrap.addView(st);
+                } else if ("failed".equals(m.sendStatus)) {
+                    TextView st = text("✗ পাঠানো যায়নি — আবার চেষ্টা করুন", 12, RED, true);
+                    st.setGravity(Gravity.END);
+                    wrap.addView(st);
+                    wrap.addView(ghostButton("↻ এই মেসেজ আবার পাঠান",
+                        new View.OnClickListener() {
+                            @Override public void onClick(View v) {
+                                resendThreadMessage(lead, m);
+                            }
+                        }));
+                }
+            }
+            threadMessages.addView(wrap);
         }
-        content.addView(thread);
+        threadScroll.addView(threadMessages, new ScrollView.LayoutParams(
+            ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT));
+        threadPane.addView(threadScroll, new LinearLayout.LayoutParams(
+            ViewGroup.LayoutParams.MATCH_PARENT, 0, 1f));
 
-        // Reply composer — always functional, never dead.
-        LinearLayout comp = card();
-        comp.addView(text("রিপ্লাই লিখুন", 16, TEXT, true));
-        final EditText input = new EditText(this);
-        input.setHint("রিপ্লাই লিখুন…");
-        input.setTextSize(15);
-        input.setInputType(InputType.TYPE_CLASS_TEXT | InputType.TYPE_TEXT_FLAG_MULTI_LINE);
-        input.setMinLines(2);
-        input.setBackground(roundedBorder(SOFT, 12));
-        input.setPadding(dp(12), dp(10), dp(12), dp(10));
-        comp.addView(input);
-        comp.addView(primaryButton("পাঠান", new View.OnClickListener() {
+        // PINNED composer: last child of threadPane, so it never scrolls
+        // away and never sits below old messages. Keyboard uses
+        // adjustResize (see AndroidManifest) so it stays visible.
+        LinearLayout comp = new LinearLayout(this);
+        comp.setOrientation(LinearLayout.VERTICAL);
+        comp.setBackgroundColor(SURFACE);
+        comp.setElevation(dp(8));
+        comp.setPadding(dp(16), dp(12), dp(16), dp(12));
+        TextView info = text("এখানে লিখলে মেসেজ সরাসরি কাস্টমারের Messenger-এ যাবে (সার্ভারের মাধ্যমে)। "
+            + "লেখার সাথে সাথে এই লিডের বট থেমে যাবে — বট আবার চালু করতে উপরের Resume AI চাপুন।",
+            13, TEXT2, false);
+        info.setPadding(0, 0, 0, dp(8));
+        comp.addView(info);
+        LinearLayout row = new LinearLayout(this);
+        row.setOrientation(LinearLayout.HORIZONTAL);
+        row.setGravity(Gravity.CENTER_VERTICAL);
+        threadInput = new EditText(this);
+        threadInput.setHint("রিপ্লাই লিখুন…");
+        threadInput.setTextSize(15);
+        threadInput.setInputType(InputType.TYPE_CLASS_TEXT | InputType.TYPE_TEXT_FLAG_MULTI_LINE);
+        threadInput.setMinLines(2);
+        threadInput.setBackground(roundedBorder(SOFT, 12));
+        threadInput.setPadding(dp(12), dp(10), dp(12), dp(10));
+        LinearLayout.LayoutParams ip = new LinearLayout.LayoutParams(
+            0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f);
+        row.addView(threadInput, ip);
+        TextView send = new TextView(this);
+        send.setText("পাঠান ➤");
+        send.setTextSize(15);
+        send.setTypeface(Typeface.DEFAULT_BOLD);
+        send.setTextColor(Color.WHITE);
+        send.setGravity(Gravity.CENTER);
+        send.setBackground(rounded(PRIMARY, 12));
+        send.setPadding(dp(16), dp(12), dp(16), dp(12));
+        LinearLayout.LayoutParams slp = new LinearLayout.LayoutParams(
+            ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT);
+        slp.setMargins(dp(8), 0, 0, 0);
+        send.setLayoutParams(slp);
+        send.setOnClickListener(new View.OnClickListener() {
             @Override public void onClick(View v) {
-                final String msg = input.getText().toString().trim();
+                String msg = threadInput.getText().toString().trim();
                 if (msg.length() == 0) {
                     Toast.makeText(MainActivity.this, "প্রথমে রিপ্লাই লিখুন।", Toast.LENGTH_SHORT).show();
                     return;
                 }
-                if (demoMode || FirebaseAuthHelper.currentUid() == null) {
-                    leadsStore.appendOwnerReply(lead, msg);
-                    input.setText("");
-                    notice = "ডেমো রিপ্লাই যোগ হয়েছে (লাইভে যায়নি)।";
-                    render();
-                } else {
-                    FirebaseAuthHelper.sendLiveReply(MainActivity.this,
-                        FirebaseAuthHelper.currentUid(), lead, msg,
-                        new FirebaseAuthHelper.ResultCallback<Boolean>() {
-                            @Override public void onSuccess(Boolean ok) {
-                                leadsStore.appendOwnerReply(lead, msg);
-                                input.setText("");
-                                notice = "রিপ্লাই পাঠানো হয়েছে।";
-                                render();
-                            }
-                            @Override public void onError(String message) {
-                                notice = "রিপ্লাই পাঠানো যায়নি: " + message;
-                                render();
-                            }
-                        });
-                }
+                sendThreadMessage(lead, msg);
             }
-        }));
-        comp.addView(outlineButton(lead.paused ? "▶ Resume AI (বট আবার চালু করুন)" : "⏸ Take Over (বট থামিয়ে নিজে উত্তর দিন)",
-            lead.paused ? GREEN : AMBER, new View.OnClickListener() {
-                @Override public void onClick(View v) {
-                    final boolean toPaused = !lead.paused;
-                    if (demoMode || FirebaseAuthHelper.currentUid() == null) {
-                        if (toPaused) leadsStore.takeOver(lead);
-                        else leadsStore.resumeAi(lead);
-                        notice = toPaused ? "Take Over হয়েছে — বট এখন থেমে আছে।"
-                            : "Resume AI হয়েছে — বট আবার উত্তর দেবে।";
-                        render();
-                    } else {
-                        FirebaseAuthHelper.updateLeadStatus(lead, toPaused,
-                            toPaused ? "handover" : "bot_replied",
-                            new FirebaseAuthHelper.ResultCallback<Boolean>() {
-                                @Override public void onSuccess(Boolean ok) {
-                                    if (toPaused) leadsStore.takeOver(lead);
-                                    else leadsStore.resumeAi(lead);
-                                    notice = toPaused ? "Take Over হয়েছে — বট এখন থেমে আছে।"
-                                        : "Resume AI হয়েছে — বট আবার উত্তর দেবে।";
-                                    render();
-                                }
-                                @Override public void onError(String message) {
-                                    notice = "স্ট্যাটাস আপডেট হয়নি: " + message;
-                                    render();
-                                }
-                            });
-                    }
+        });
+        row.addView(send);
+        comp.addView(row);
+        threadPane.addView(comp);
+
+        // v5: land on the LATEST message, every time the thread opens.
+        scrollToThreadBottom();
+    }
+
+    // v5 SEND FLOW: message appears at the bottom IMMEDIATELY as "sending",
+    // then flips to sent/failed. Sending ALSO auto-pauses the bot, so the
+    // bot cannot answer the same customer twice.
+    private void sendThreadMessage(final LeadsStore.Lead lead, final String msg) {
+        final LeadsStore.Message m = leadsStore.addSendingOwnerMessage(lead, msg);
+        if (threadInput != null) threadInput.setText("");
+        renderThreadScreen();
+        if (demoMode || FirebaseAuthHelper.currentUid() == null) {
+            m.sendStatus = "sent";
+            Toast.makeText(this, "ডেমো রিপ্লাই যোগ হয়েছে (লাইভে যায়নি)।", Toast.LENGTH_SHORT).show();
+            renderThreadScreen();
+            return;
+        }
+        FirebaseAuthHelper.sendLiveReply(this, FirebaseAuthHelper.currentUid(), lead, msg,
+            new FirebaseAuthHelper.ResultCallback<Boolean>() {
+                @Override public void onSuccess(Boolean ok) {
+                    m.sendStatus = "sent";
+                    // Auto-pause in Firestore too, so the website shows
+                    // Handover and the bot stays stopped for this lead.
+                    FirebaseAuthHelper.updateLeadStatus(lead, true, "handover",
+                        new FirebaseAuthHelper.ResultCallback<Boolean>() {
+                            @Override public void onSuccess(Boolean o) { }
+                            @Override public void onError(String e) { }
+                        });
+                    renderThreadScreen();
                 }
-            }));
-        comp.addView(outlineButton("📋 লিড ডিটেইলস কপি করুন", PRIMARY,
-            new View.OnClickListener() {
-                @Override public void onClick(View v) {
-                    copyText("lead", leadsStore.copyLeadDetails(lead));
+                @Override public void onError(String message) {
+                    m.sendStatus = "failed";
+                    renderThreadScreen();
                 }
-            }));
-        content.addView(comp);
+            });
+    }
+
+    private void resendThreadMessage(final LeadsStore.Lead lead, final LeadsStore.Message m) {
+        m.sendStatus = "sending";
+        renderThreadScreen();
+        if (demoMode || FirebaseAuthHelper.currentUid() == null) {
+            m.sendStatus = "sent";
+            renderThreadScreen();
+            return;
+        }
+        FirebaseAuthHelper.sendLiveReply(this, FirebaseAuthHelper.currentUid(), lead, m.text,
+            new FirebaseAuthHelper.ResultCallback<Boolean>() {
+                @Override public void onSuccess(Boolean ok) {
+                    m.sendStatus = "sent";
+                    FirebaseAuthHelper.updateLeadStatus(lead, true, "handover",
+                        new FirebaseAuthHelper.ResultCallback<Boolean>() {
+                            @Override public void onSuccess(Boolean o) { }
+                            @Override public void onError(String e) { }
+                        });
+                    renderThreadScreen();
+                }
+                @Override public void onError(String message) {
+                    m.sendStatus = "failed";
+                    renderThreadScreen();
+                }
+            });
+    }
+
+    private void toggleLeadPause(final LeadsStore.Lead lead) {
+        final boolean toPaused = !lead.paused;
+        if (demoMode || FirebaseAuthHelper.currentUid() == null) {
+            if (toPaused) leadsStore.takeOver(lead);
+            else leadsStore.resumeAi(lead);
+            renderThreadScreen();
+            return;
+        }
+        FirebaseAuthHelper.updateLeadStatus(lead, toPaused,
+            toPaused ? "handover" : "bot_replied",
+            new FirebaseAuthHelper.ResultCallback<Boolean>() {
+                @Override public void onSuccess(Boolean ok) {
+                    if (toPaused) leadsStore.takeOver(lead);
+                    else leadsStore.resumeAi(lead);
+                    renderThreadScreen();
+                }
+                @Override public void onError(String message) {
+                    Toast.makeText(MainActivity.this,
+                        "স্ট্যাটাস আপডেট হয়নি: " + message, Toast.LENGTH_LONG).show();
+                }
+            });
     }
 
     // ---- Screens: Connect / Services / Subscriptions / Tokens / About ----
@@ -1391,7 +1588,7 @@ public class MainActivity extends Activity {
         content.addView(outlineButton("ওয়েবসাইট খুলুন", PRIMARY, new View.OnClickListener() {
             @Override public void onClick(View v) { openUrl(LiveDataClient.WEBSITE_URL); }
         }));
-        TextView ver = text("ভার্সন 4.0 • ইন-অ্যাপ Firebase লগইন • লগইন কখনো ওয়েবসাইটে যাবে না", 12, TEXT2, false);
+        TextView ver = text("ভার্সন 5.0 • ইন-অ্যাপ Firebase লগইন • লগইন কখনো ওয়েবসাইটে যাবে না", 12, TEXT2, false);
         ver.setGravity(Gravity.CENTER);
         ver.setPadding(0, dp(8), 0, 0);
         content.addView(ver);
