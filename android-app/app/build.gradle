@@ -1,0 +1,28 @@
+plugins {
+    id 'com.android.application'
+}
+
+android {
+    namespace 'com.automateiq.app'
+    compileSdk 34
+
+    defaultConfig {
+        applicationId "com.automateiq.app"
+        minSdk 24
+        targetSdk 34
+        versionCode 5
+        versionName "1.4"
+    }
+
+    buildTypes {
+        release {
+            minifyEnabled false
+            shrinkResources false
+        }
+    }
+
+    compileOptions {
+        sourceCompatibility JavaVersion.VERSION_1_8
+        targetCompatibility JavaVersion.VERSION_1_8
+    }
+}
