@@ -11,11 +11,24 @@ android {
         applicationId "com.automateiq.app"
         minSdk 24
         targetSdk 34
-        versionCode 8
-        versionName "4.0"
+        versionCode 9
+        versionName "5.0"
     }
 
     buildTypes {
+        // v5 SIZE: GitHub Actions builds assembleDebug, so THIS block is
+        // what shrinks the shipped APK. R8 minify + shrinkResources strip
+        // unused Firebase/Play-services code and resources. firebase-auth,
+        // firebase-firestore and play-services-auth are NOT removed —
+        // proguard-rules.pro keeps them explicitly, so login + live leads
+        // keep working. Real size is measured by the Actions build; no
+        // size is claimed from local files here.
+        debug {
+            minifyEnabled true
+            shrinkResources true
+            proguardFiles getDefaultProguardFile('proguard-android-optimize.txt'),
+                'proguard-rules.pro'
+        }
         release {
             minifyEnabled false
             shrinkResources false
