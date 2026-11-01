@@ -475,7 +475,7 @@ public class MainActivity extends Activity {
             if (selected) item.setBackground(rounded(SOFT_BLUE, 14));
             else item.setBackground(rippleBackground());
             ImageView icon = iconView(iconRes(it[0]), selected ? PRIMARY : TEXT2);
-            icon.setGravity(Gravity.CENTER);
+            icon.setScaleType(ImageView.ScaleType.CENTER);
             TextView label = new TextView(this);
             label.setText(it[1]);
             label.setTextSize(11);
