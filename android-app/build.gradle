@@ -1,3 +1,10 @@
+// Top-level build file — AutoMateIQ Mobile Dashboard App v4.0.
+// Firebase wiring lives here (google-services plugin) and in app/build.gradle.
+// No secret, token, key or password is stored in this file or anywhere in
+// this project. The real google-services.json comes from Firebase Console
+// and is placed in app/ at build time (see README.md and
+// google-services.json.placeholder).
 plugins {
     id 'com.android.application' version '8.5.2' apply false
+    id 'com.google.gms.google-services' version '4.4.2' apply false
 }
