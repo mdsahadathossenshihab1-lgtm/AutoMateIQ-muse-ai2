@@ -27,7 +27,16 @@ import java.util.ArrayList;
 import java.util.List;
 
 /**
- * AutoMateIQ Mobile Dashboard v5.0 — CHAT UX FIX + PROFESSIONAL SHELL + SMALLER SIZE.
+ * AutoMateIQ Mobile Dashboard v6.0 — IN-APP ORDERS + ORDER MANAGEMENT +
+ * SUBSCRIPTION FROM REAL ORDERS + CHAT REFRESH FIX.
+ *
+ * v6 ADDS (user feedback 2026-11-01 23:29): orders are placed and
+ * managed INSIDE the app (no website redirect for ordering), using
+ * the same Firestore 'orders' collection/shape as the website;
+ * My Subscription is derived from real monthly orders (date + 1
+ * month, days remaining); and the chat refresh bug is fixed by
+ * making the Render server the single writer of owner messages
+ * into Firestore, with the app reloading the lead doc after send.
  *
  * v5 FIXES THE v4 CHAT BUG (user feedback 2026-11-01 22:47): v4 put the WHOLE
  * app in ONE ScrollView and render() scrolled to top, so a thread opened at
@@ -97,6 +106,10 @@ public class MainActivity extends Activity {
     private static final int S_TOKENS = 9;
     private static final int S_MY_SUB = 10;
     private static final int S_ABOUT = 11;
+    private static final int S_ORDERS = 12;
+    private static final int S_ORDER_DETAIL = 13;
+    private static final int S_ORDER_FORM = 14;
+    private static final int S_RECHARGE_FORM = 15;
 
     private LinearLayout root;
     private LinearLayout topBar;
@@ -128,6 +141,19 @@ public class MainActivity extends Activity {
     private String currentFilter = "all";
     private LeadsStore.Lead currentLead = null;
     private Service currentService = null;
+
+    // v6 ORDERS: live list from Firestore 'orders' (same as website).
+    private List<OrderStore.Order> orders = new ArrayList<OrderStore.Order>();
+    private boolean ordersLoaded = false;
+    private boolean ordersLoading = false;
+    private String ordersError = null;
+    private String orderFilter = "all";
+    private OrderStore.Order currentOrder = null;
+    private OrderStore.OrderPackage selectedPackage = null;
+    private String selectedTokenAmount = null;
+    // Status of the monthly order behind mySubscription (for the
+    // "awaiting admin approval" note on a pending subscription).
+    private String mySubscriptionOrderStatus = "";
 
     // ---- Services (verified website prices only) ----
     private static class Service {
@@ -199,6 +225,7 @@ public class MainActivity extends Activity {
             signedIn = true;
             demoMode = false;
             loadLiveLeads();
+            loadLiveOrders();
             go(S_DASH, false);
         } else {
             go(S_LOGIN, false);
@@ -216,6 +243,7 @@ public class MainActivity extends Activity {
                         demoMode = false;
                         loginError = null;
                         loadLiveLeads();
+                        loadLiveOrders();
                         go(S_DASH, false);
                     }
                     @Override public void onError(String message) {
@@ -275,6 +303,8 @@ public class MainActivity extends Activity {
         signedIn = false;
         leadsStore.setLiveLeads(LeadsStore.demoLeads());
         mySubscription = SubscriptionStore.demoSubscription();
+        orders = OrderStore.demoOrders();
+        ordersLoaded = true;
         leadsLoading = false;
         leadsError = null;
         notice = "ডেমো প্রিভিউ চলছে — এগুলো আসল কাস্টমার নয়।";
@@ -286,6 +316,10 @@ public class MainActivity extends Activity {
         signedIn = false;
         demoMode = false;
         mySubscription = null;
+        orders = new ArrayList<OrderStore.Order>();
+        ordersLoaded = false;
+        currentOrder = null;
+        selectedPackage = null;
         leadsStore.setLiveLeads(new ArrayList<LeadsStore.Lead>());
         backStack.clear();
         go(S_LOGIN, false);
@@ -352,7 +386,7 @@ public class MainActivity extends Activity {
         titles.setOrientation(LinearLayout.VERTICAL);
         titles.setPadding(dp(10), 0, 0, 0);
         TextView t = text("AutoMateIQ", 18, TEXT, true);
-        TextView s = text("মোবাইল ড্যাশবোর্ড • v5.0", 12, TEXT2, false);
+        TextView s = text("মোবাইল ড্যাশবোর্ড • v6.0", 12, TEXT2, false);
         titles.addView(t);
         titles.addView(s);
         LinearLayout.LayoutParams tp = new LinearLayout.LayoutParams(0,
@@ -386,6 +420,7 @@ public class MainActivity extends Activity {
             {"💬", "লিডস", String.valueOf(S_LEADS)},
             {"🔗", "কানেক্ট", String.valueOf(S_CONNECT)},
             {"🛍️", "সার্ভিস", String.valueOf(S_SERVICES)},
+            {"📦", "অর্ডার", String.valueOf(S_ORDERS)},
             {"📅", "সাবস্ক্রিপশন", String.valueOf(S_SUBS)},
         };
         for (final String[] it : items) {
@@ -397,6 +432,9 @@ public class MainActivity extends Activity {
             boolean selected = screen == target
                 || (target == S_DASH && (screen == S_DASH))
                 || (target == S_LEADS && (screen == S_LEAD_DETAIL))
+                || (target == S_ORDERS && (screen == S_ORDERS
+                    || screen == S_ORDER_DETAIL || screen == S_ORDER_FORM
+                    || screen == S_RECHARGE_FORM))
                 || (target == S_SUBS && (screen == S_MY_SUB || screen == S_TOKENS));
             if (selected) item.setBackground(rounded(SOFT_BLUE, 14));
             else item.setBackground(rippleBackground());
@@ -454,6 +492,10 @@ public class MainActivity extends Activity {
             case S_SUBS: showSubscriptions(); break;
             case S_TOKENS: showTokens(); break;
             case S_MY_SUB: showMySubscription(); break;
+            case S_ORDERS: showOrders(); break;
+            case S_ORDER_DETAIL: showOrderDetail(); break;
+            case S_ORDER_FORM: showOrderForm(); break;
+            case S_RECHARGE_FORM: showRechargeForm(); break;
             case S_ABOUT: showAbout(); break;
             default: showDashboard(); break;
         }
@@ -608,6 +650,32 @@ public class MainActivity extends Activity {
         } catch (Exception e) {
             Toast.makeText(this, "কপি করা যায়নি।", Toast.LENGTH_SHORT).show();
         }
+    }
+
+    // Website payment number, exactly as shown in the website OrderModal
+    // ("bKash/Nagad (Personal)" + Copy button). Shown ONLY in the order
+    // form and wallet recharge form below, where the customer must know
+    // where to send money before filling senderPhone/trxId. This is the
+    // ONLY contact number displayed anywhere in the app; no other phone,
+    // email, or contact is shown. (The Messenger bot rule is unchanged:
+    // the bot still never gives contact info in chat replies.)
+    private static final String PAYMENT_NUMBER = "01842-369496";
+
+    // Payment info card, styled like the other v6 cards. Used ONLY by
+    // showOrderForm() Step 2 and showRechargeForm().
+    private LinearLayout paymentInfoCard() {
+        LinearLayout c = card();
+        c.setBackground(rounded(SOFT_BLUE, 20));
+        c.addView(text("bKash/Nagad (Personal)", 16, NAVY, true));
+        TextView num = text(PAYMENT_NUMBER, 22, PRIMARY, true);
+        num.setTypeface(Typeface.create(Typeface.MONOSPACE, Typeface.BOLD));
+        num.setPadding(0, dp(6), 0, dp(2));
+        c.addView(num);
+        c.addView(text("এই নম্বরে টাকা পাঠান, তারপর নিচে আপনার Sender নম্বর + TrxID লিখুন।", 13, TEXT2, false));
+        c.addView(outlineButton("📋 পেমেন্ট নম্বর কপি করুন", PRIMARY, new View.OnClickListener() {
+            @Override public void onClick(View v) { copyText("payment", PAYMENT_NUMBER); }
+        }));
+        return c;
     }
 
     private String bn(String n) {
@@ -873,6 +941,12 @@ public class MainActivity extends Activity {
         qc.addView(outlineButton("🪙 টোকেন কিনুন", PRIMARY, new View.OnClickListener() {
             @Override public void onClick(View v) { go(S_TOKENS, true); }
         }));
+        qc.addView(outlineButton("📦 অর্ডার করুন (অ্যাপের ভিতরেই)", PRIMARY, new View.OnClickListener() {
+            @Override public void onClick(View v) { selectedPackage = null; go(S_ORDER_FORM, true); }
+        }));
+        qc.addView(outlineButton("📦 আমার অর্ডার দেখুন", PRIMARY, new View.OnClickListener() {
+            @Override public void onClick(View v) { go(S_ORDERS, true); }
+        }));
         content.addView(qc);
 
         // Recent leads
@@ -1101,6 +1175,12 @@ public class MainActivity extends Activity {
                     copyText("lead", leadsStore.copyLeadDetails(lead));
                 }
             }));
+        head.addView(ghostButton("🔄 রিফ্রেশ (সার্ভার থেকে আবার আনুন)",
+            new View.OnClickListener() {
+                @Override public void onClick(View v) {
+                    refreshThread(lead);
+                }
+            }));
         threadPane.addView(head);
 
         // Messages area: its OWN ScrollView. This is the v5 fix — messages
@@ -1150,6 +1230,10 @@ public class MainActivity extends Activity {
                     wrap.addView(st);
                 } else if ("sent".equals(m.sendStatus)) {
                     TextView st = text("✓ Messenger-এ পাঠানো হয়েছে", 12, GREEN, true);
+                    st.setGravity(Gravity.END);
+                    wrap.addView(st);
+                } else if ("sent_pending_save".equals(m.sendStatus)) {
+                    TextView st = text("✓ Messenger-এ পাঠানো হয়েছে • চ্যাট হিস্ট্রিতে সেভ হচ্ছে…", 12, AMBER, true);
                     st.setGravity(Gravity.END);
                     wrap.addView(st);
                 } else if ("failed".equals(m.sendStatus)) {
@@ -1230,6 +1314,16 @@ public class MainActivity extends Activity {
     // v5 SEND FLOW: message appears at the bottom IMMEDIATELY as "sending",
     // then flips to sent/failed. Sending ALSO auto-pauses the bot, so the
     // bot cannot answer the same customer twice.
+    // v6 SEND FLOW + CHAT REFRESH FIX: the Render server is the
+    // SINGLE WRITER of the owner message into Firestore (see the bot
+    // server change). The app never writes the owner message itself —
+    // that would duplicate it. After a successful send the app RELOADS
+    // the lead doc from Firestore and displays the reloaded thread, so
+    // Refresh and re-open show exactly what Messenger shows. If the
+    // server has not deployed the history-write yet (saved=false),
+    // the message stays visible locally with an honest
+    // "saving to chat history…" status instead of silently pretending
+    // a locally-only message is saved.
     private void sendThreadMessage(final LeadsStore.Lead lead, final String msg) {
         final LeadsStore.Message m = leadsStore.addSendingOwnerMessage(lead, msg);
         if (threadInput != null) threadInput.setText("");
@@ -1240,18 +1334,28 @@ public class MainActivity extends Activity {
             renderThreadScreen();
             return;
         }
-        FirebaseAuthHelper.sendLiveReply(this, FirebaseAuthHelper.currentUid(), lead, msg,
-            new FirebaseAuthHelper.ResultCallback<Boolean>() {
-                @Override public void onSuccess(Boolean ok) {
-                    m.sendStatus = "sent";
-                    // Auto-pause in Firestore too, so the website shows
-                    // Handover and the bot stays stopped for this lead.
+        FirebaseAuthHelper.sendLiveReplyWithSave(this, FirebaseAuthHelper.currentUid(), lead, msg,
+            new FirebaseAuthHelper.ResultCallback<FirebaseAuthHelper.ReplyOutcome>() {
+                @Override public void onSuccess(FirebaseAuthHelper.ReplyOutcome outcome) {
+                    if (!outcome.saved) {
+                        // Old server: Messenger got it, history did not.
+                        m.sendStatus = "sent_pending_save";
+                        FirebaseAuthHelper.updateLeadStatus(lead, true, "handover",
+                            new FirebaseAuthHelper.ResultCallback<Boolean>() {
+                                @Override public void onSuccess(Boolean o) { }
+                                @Override public void onError(String e) { }
+                            });
+                        notice = "Messenger-এ পাঠানো হয়েছে, কিন্তু সার্ভারের পুরনো ভার্সন চ্যাট হিস্ট্রি সেভ করেনি — সার্ভার আপডেট ডেপ্লয় হলে রিফ্রেশে দেখা যাবে।";
+                        renderThreadScreen();
+                        return;
+                    }
+                    // Server saved it: pause, then reload the doc so the
+                    // thread on screen IS the server-saved thread.
                     FirebaseAuthHelper.updateLeadStatus(lead, true, "handover",
                         new FirebaseAuthHelper.ResultCallback<Boolean>() {
-                            @Override public void onSuccess(Boolean o) { }
-                            @Override public void onError(String e) { }
+                            @Override public void onSuccess(Boolean o) { reloadLeadIntoThread(lead); }
+                            @Override public void onError(String e) { reloadLeadIntoThread(lead); }
                         });
-                    renderThreadScreen();
                 }
                 @Override public void onError(String message) {
                     m.sendStatus = "failed";
@@ -1268,22 +1372,636 @@ public class MainActivity extends Activity {
             renderThreadScreen();
             return;
         }
-        FirebaseAuthHelper.sendLiveReply(this, FirebaseAuthHelper.currentUid(), lead, m.text,
-            new FirebaseAuthHelper.ResultCallback<Boolean>() {
-                @Override public void onSuccess(Boolean ok) {
-                    m.sendStatus = "sent";
+        FirebaseAuthHelper.sendLiveReplyWithSave(this, FirebaseAuthHelper.currentUid(), lead, m.text,
+            new FirebaseAuthHelper.ResultCallback<FirebaseAuthHelper.ReplyOutcome>() {
+                @Override public void onSuccess(FirebaseAuthHelper.ReplyOutcome outcome) {
+                    if (!outcome.saved) {
+                        m.sendStatus = "sent_pending_save";
+                        renderThreadScreen();
+                        return;
+                    }
                     FirebaseAuthHelper.updateLeadStatus(lead, true, "handover",
                         new FirebaseAuthHelper.ResultCallback<Boolean>() {
-                            @Override public void onSuccess(Boolean o) { }
-                            @Override public void onError(String e) { }
+                            @Override public void onSuccess(Boolean o) { reloadLeadIntoThread(lead); }
+                            @Override public void onError(String e) { reloadLeadIntoThread(lead); }
                         });
-                    renderThreadScreen();
                 }
                 @Override public void onError(String message) {
                     m.sendStatus = "failed";
                     renderThreadScreen();
                 }
             });
+    }
+
+    /** Reload ONE lead doc from Firestore and swap it into the list
+     *  and the open thread. This is what makes Refresh truthful. */
+    private void reloadLeadIntoThread(final LeadsStore.Lead lead) {
+        if (demoMode || FirebaseAuthHelper.currentUid() == null) {
+            renderThreadScreen();
+            return;
+        }
+        FirebaseAuthHelper.fetchLead(lead.pageId, lead.psid,
+            new FirebaseAuthHelper.ResultCallback<LeadsStore.Lead>() {
+                @Override public void onSuccess(LeadsStore.Lead reloaded) {
+                    List<LeadsStore.Lead> all = leadsStore.all();
+                    for (int i = 0; i < all.size(); i++) {
+                        if (all.get(i).docId().equals(reloaded.docId())) {
+                            all.set(i, reloaded);
+                            break;
+                        }
+                    }
+                    currentLead = reloaded;
+                    renderThreadScreen();
+                }
+                @Override public void onError(String message) {
+                    Toast.makeText(MainActivity.this,
+                        "রিলোড হয়নি: " + message, Toast.LENGTH_LONG).show();
+                    renderThreadScreen();
+                }
+            });
+    }
+
+    /** Thread Refresh button: reload from Firestore, honestly. If the
+     *  just-sent message is missing, the server history-write has not
+     *  deployed yet — say so, instead of showing a stale thread. */
+    private void refreshThread(final LeadsStore.Lead lead) {
+        if (demoMode || FirebaseAuthHelper.currentUid() == null) {
+            renderThreadScreen();
+            return;
+        }
+        final int beforeCount = lead.messages.size();
+        FirebaseAuthHelper.fetchLead(lead.pageId, lead.psid,
+            new FirebaseAuthHelper.ResultCallback<LeadsStore.Lead>() {
+                @Override public void onSuccess(LeadsStore.Lead reloaded) {
+                    List<LeadsStore.Lead> all = leadsStore.all();
+                    for (int i = 0; i < all.size(); i++) {
+                        if (all.get(i).docId().equals(reloaded.docId())) {
+                            all.set(i, reloaded);
+                            break;
+                        }
+                    }
+                    currentLead = reloaded;
+                    if (reloaded.messages.size() < beforeCount) {
+                        notice = "রিফ্রেশে নতুন মেসেজ দেখা যাচ্ছে না — সার্ভারের হিস্ট্রি-সেভ আপডেট এখনো ডেপ্লয় হয়নি হতে পারে। Messenger-এ মেসেজটি ঠিকই পাঠানো হয়েছে।";
+                    } else {
+                        Toast.makeText(MainActivity.this, "রিফ্রেশ হয়েছে।", Toast.LENGTH_SHORT).show();
+                    }
+                    renderThreadScreen();
+                }
+                @Override public void onError(String message) {
+                    Toast.makeText(MainActivity.this,
+                        "রিফ্রেশ হয়নি: " + message, Toast.LENGTH_LONG).show();
+                }
+            });
+    }
+
+    // ---- v6: ORDERS (in-app, same Firestore 'orders' as website) ----
+
+    private OrderStore.OrderPackage findMonthlyPackage(String service, String pkgLabel) {
+        for (OrderStore.OrderPackage p : OrderStore.PACKAGES) {
+            if (!"monthly".equals(p.billing)) continue;
+            if (!p.service.equals(service)) continue;
+            if ("স্ট্যান্ডার্ড".equals(pkgLabel) && p.pkg.contains("স্ট্যান্ডার্ড")) return p;
+            if ("প্রিমিয়াম".equals(pkgLabel) && p.pkg.contains("প্রিমিয়াম")) return p;
+            if ("মাসিক".equals(pkgLabel) && p.pkg.contains("মাসিক")) return p;
+        }
+        return null;
+    }
+
+    private void deriveMySubscription() {
+        if (demoMode) return;
+        SubscriptionStore.Subscription derived =
+            OrderStore.subscriptionFromOrders(orders);
+        mySubscription = derived;
+        mySubscriptionOrderStatus = "";
+        if (derived != null) {
+            for (OrderStore.Order o : orders) {
+                if (o.isMonthly() && !"cancelled".equals(o.status)
+                    && !"rejected".equals(o.status)
+                    && o.dateMillis == derived.startMillis) {
+                    mySubscriptionOrderStatus = o.status;
+                    break;
+                }
+            }
+        }
+    }
+
+    private void loadLiveOrders() {
+        String uid = FirebaseAuthHelper.currentUid();
+        if (uid == null) {
+            ordersError = "লগইন করা নেই। আবার লগইন করুন।";
+            ordersLoading = false;
+            return;
+        }
+        if (demoMode) {
+            orders = OrderStore.demoOrders();
+            ordersLoaded = true;
+            ordersLoading = false;
+            ordersError = null;
+            deriveMySubscription();
+            return;
+        }
+        ordersLoading = true;
+        ordersError = null;
+        final boolean admin = FirebaseAuthHelper.isAdmin();
+        FirebaseAuthHelper.fetchOrders(uid, admin,
+            new FirebaseAuthHelper.ResultCallback<List<OrderStore.Order>>() {
+                @Override public void onSuccess(List<OrderStore.Order> live) {
+                    orders = live;
+                    ordersLoaded = true;
+                    ordersLoading = false;
+                    ordersError = null;
+                    deriveMySubscription();
+                    if (screen == S_DASH || screen == S_ORDERS || screen == S_MY_SUB) render();
+                }
+                @Override public void onError(String message) {
+                    ordersLoading = false;
+                    ordersError = message;
+                    if (screen == S_DASH || screen == S_ORDERS || screen == S_MY_SUB) render();
+                }
+            });
+    }
+
+    private TextView orderStatusChip(OrderStore.Order o) {
+        if ("in_progress".equals(o.status)) return chip("▶ চলমান", SOFT_BLUE, PRIMARY);
+        if ("completed".equals(o.status)) return chip("✓ সম্পন্ন", GREEN_SOFT, GREEN);
+        if ("cancelled".equals(o.status) || "rejected".equals(o.status)) return chip("✕ বাতিল", RED_SOFT, RED);
+        return chip("⏳ অপেক্ষমাণ", AMBER_SOFT, AMBER);
+    }
+
+    private void showOrders() {
+        content.addView(text("অর্ডার", 24, NAVY, true));
+        final boolean admin = !demoMode && FirebaseAuthHelper.isAdmin();
+        if (demoMode) {
+            content.addView(bannerCard("🧪 ডেমো প্রিভিউ — এগুলো আসল অর্ডার নয়", AMBER_SOFT, AMBER));
+        } else if (admin) {
+            content.addView(bannerCard("অ্যাডমিন মোড — সব কাস্টমারের অর্ডার দেখা যাচ্ছে। স্ট্যাটাস শুধু অ্যাডমিন বদলাতে পারবেন।", GREEN_SOFT, GREEN));
+            LinearLayout ruleNote = card();
+            ruleNote.setBackground(rounded(AMBER_SOFT, 20));
+            ruleNote.addView(text("অন্য কাস্টমারের অ্যাকাউন্টে সাবস্ক্রিপশন যোগ করা: এখনো চালু হয়নি — Firestore rules-এ orders create-এ অ্যাডমিন অনুমতি যোগ করতে হবে (আলাদা পেন্ডিং টাস্ক)। এখন অ্যাডমিন শুধু নিজের অ্যাকাউন্টের অর্ডার তৈরি করতে পারবেন; অন্যের userId দিয়ে তৈরি করলে rules বাধা দেবে।", 13, TEXT, false));
+            content.addView(ruleNote);
+        } else {
+            content.addView(bannerCard("শুধু আপনার নিজের অর্ডার দেখা যাচ্ছে। অন্যের অর্ডার এখানে দেখানো হয় না।", SOFT_BLUE, PRIMARY));
+        }
+        content.addView(primaryButton("＋ নতুন অর্ডার করুন (অ্যাপের ভিতরেই)", new View.OnClickListener() {
+            @Override public void onClick(View v) { selectedPackage = null; go(S_ORDER_FORM, true); }
+        }));
+        // Status filter chips
+        LinearLayout filters = card();
+        filters.addView(text("ফিল্টার", 15, TEXT, true));
+        String[][] fdefs = {{"all", "সব"}, {"pending", "অপেক্ষমাণ"},
+            {"in_progress", "চলমান"}, {"completed", "সম্পন্ন"}, {"cancelled", "বাতিল"}};
+        for (final String[] f : fdefs) {
+            final String key = f[0];
+            LinearLayout row = new LinearLayout(this);
+            row.setOrientation(LinearLayout.HORIZONTAL);
+            row.setGravity(Gravity.CENTER_VERTICAL);
+            row.setPadding(0, dp(4), 0, dp(4));
+            TextView lbl = text((orderFilter.equals(key) ? "● " : "○ ") + f[1], 15,
+                orderFilter.equals(key) ? PRIMARY : TEXT, orderFilter.equals(key));
+            row.addView(lbl);
+            row.setBackground(rippleBackground());
+            row.setClickable(true);
+            row.setOnClickListener(new View.OnClickListener() {
+                @Override public void onClick(View v) { orderFilter = key; render(); }
+            });
+            filters.addView(row);
+        }
+        content.addView(filters);
+        if (ordersLoading) {
+            content.addView(text("লোড হচ্ছে…", 14, TEXT2, false));
+            return;
+        }
+        if (ordersError != null) {
+            content.addView(text(ordersError, 14, RED, true));
+            content.addView(primaryButton("আবার চেষ্টা করুন", new View.OnClickListener() {
+                @Override public void onClick(View v) { loadLiveOrders(); render(); }
+            }));
+            return;
+        }
+        List<OrderStore.Order> shown = new ArrayList<OrderStore.Order>();
+        for (OrderStore.Order o : orders) {
+            if ("all".equals(orderFilter) || orderFilter.equals(o.status)) shown.add(o);
+        }
+        if (shown.isEmpty()) {
+            LinearLayout c = card();
+            c.addView(text("এখনো কোনো অর্ডার নেই", 17, TEXT, true));
+            TextView t = text("নতুন অর্ডার করলে এখানে দেখা যাবে — স্ট্যাটাস Pending থেকে শুরু হবে, অ্যাডমিন অনুমোদন দিলে চলমান হবে।", 14, TEXT2, false);
+            t.setPadding(0, dp(6), 0, 0);
+            c.addView(t);
+            content.addView(c);
+            return;
+        }
+        for (final OrderStore.Order o : shown) {
+            LinearLayout row = card();
+            LinearLayout top = new LinearLayout(this);
+            top.setOrientation(LinearLayout.HORIZONTAL);
+            top.setGravity(Gravity.CENTER_VERTICAL);
+            TextView nm = text(o.serviceName, 16, TEXT, true);
+            LinearLayout.LayoutParams mp = new LinearLayout.LayoutParams(
+                0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f);
+            top.addView(nm, mp);
+            top.addView(orderStatusChip(o));
+            row.addView(top);
+            row.addView(text(o.packageDetails + "  •  " + o.amount, 14, TEXT, false));
+            row.addView(text("কাস্টমার: " + o.userName + "  •  TrxID: " + o.trxId, 13, TEXT2, false));
+            if (o.isMonthly()) {
+                SubscriptionStore.Subscription sub = SubscriptionStore.fromOrder(
+                    o.serviceName, o.packageDetails, o.amount, o.dateMillis, 1);
+                row.addView(text("সাবস্ক্রিপশন: " + SubscriptionStore.daysRemainingBn(sub)
+                    + "  •  শেষ: " + SubscriptionStore.formatDate(sub.expiryMillis), 13, PRIMARY, true));
+            }
+            row.setBackground(rippleBackground());
+            row.setClickable(true);
+            row.setOnClickListener(new View.OnClickListener() {
+                @Override public void onClick(View v) { currentOrder = o; go(S_ORDER_DETAIL, true); }
+            });
+            content.addView(row);
+        }
+        content.addView(outlineButton("🔄 অর্ডার রিফ্রেশ করুন", PRIMARY, new View.OnClickListener() {
+            @Override public void onClick(View v) {
+                if (demoMode) render(); else loadLiveOrders();
+            }
+        }));
+    }
+
+    private void showOrderDetail() {
+        final OrderStore.Order o = currentOrder;
+        if (o == null) { go(S_ORDERS, false); return; }
+        content.addView(ghostButton("← অর্ডারে ফিরুন", new View.OnClickListener() {
+            @Override public void onClick(View v) { go(S_ORDERS, false); }
+        }));
+        LinearLayout c = card();
+        LinearLayout top = new LinearLayout(this);
+        top.setOrientation(LinearLayout.HORIZONTAL);
+        top.setGravity(Gravity.CENTER_VERTICAL);
+        TextView nm = text(o.serviceName, 20, NAVY, true);
+        LinearLayout.LayoutParams mp = new LinearLayout.LayoutParams(
+            0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f);
+        top.addView(nm, mp);
+        top.addView(orderStatusChip(o));
+        c.addView(top);
+        c.addView(text(o.packageDetails + "  •  " + o.amount, 16, TEXT, false));
+        c.addView(text("কাস্টমার: " + o.userName, 14, TEXT, false));
+        c.addView(text("পেমেন্ট: " + o.paymentMethod + "  •  Sender: " + o.senderPhone, 14, TEXT, false));
+        c.addView(text("TrxID: " + o.trxId, 14, TEXT, false));
+        if (o.clientPageLink != null && o.clientPageLink.length() > 0)
+            c.addView(text("পেজ লিংক: " + o.clientPageLink, 14, TEXT, false));
+        if (o.clientRequirements != null && o.clientRequirements.length() > 0)
+            c.addView(text("চাহিদা: " + o.clientRequirements, 14, TEXT, false));
+        if (o.startDate != null && o.startDate.length() > 0)
+            c.addView(text("শুরু: " + o.startDate, 14, TEXT2, false));
+        if (o.completionDate != null && o.completionDate.length() > 0)
+            c.addView(text("সম্পন্ন: " + o.completionDate, 14, TEXT2, false));
+        content.addView(c);
+        if (o.isMonthly()) {
+            SubscriptionStore.Subscription sub = SubscriptionStore.fromOrder(
+                o.serviceName, o.packageDetails, o.amount, o.dateMillis, 1);
+            LinearLayout sc = card();
+            sc.addView(text("সাবস্ক্রিপশন (মাসিক)", 17, TEXT, true));
+            sc.addView(text(SubscriptionStore.daysRemainingBn(sub), 26, PRIMARY, true));
+            sc.addView(progressBar(sub.progressPercent()));
+            sc.addView(text("শুরু: " + SubscriptionStore.formatDate(sub.startMillis)
+                + "  •  শেষ: " + SubscriptionStore.formatDate(sub.expiryMillis), 14, TEXT2, false));
+            sc.addView(sub.isActive() ? chip("চালু আছে", GREEN_SOFT, GREEN)
+                : chip("মেয়াদ শেষ", RED_SOFT, RED));
+            if ("pending".equals(o.status)) {
+                sc.addView(text("অর্ডারটি Pending — অ্যাডমিন অনুমোদন দিলে সার্ভিস সক্রিয় হবে।", 13, AMBER, true));
+            }
+            content.addView(sc);
+        } else {
+            LinearLayout nc = card();
+            nc.addView(text("এটি মাসিক সাবস্ক্রিপশন নয় — তাই এখানে দিনের হিসাব দেখানো হয় না। এককালীনের আলাদা ফাংশন পরে আলোচনা করে ঠিক করা হবে।", 13, TEXT, false));
+            content.addView(nc);
+        }
+        final boolean admin = !demoMode && FirebaseAuthHelper.isAdmin();
+        if (admin) {
+            LinearLayout ac = card();
+            ac.addView(text("অ্যাডমিন — স্ট্যাটাস বদলান", 17, TEXT, true));
+            if ("pending".equals(o.status)) {
+                ac.addView(primaryButton("▶ In Progress করুন", new View.OnClickListener() {
+                    @Override public void onClick(View v) { changeOrderStatus(o, "in_progress"); }
+                }));
+                ac.addView(outlineButton("✕ Cancel করুন", RED, new View.OnClickListener() {
+                    @Override public void onClick(View v) { changeOrderStatus(o, "cancelled"); }
+                }));
+            } else if ("in_progress".equals(o.status)) {
+                ac.addView(primaryButton("✓ Completed করুন", new View.OnClickListener() {
+                    @Override public void onClick(View v) { changeOrderStatus(o, "completed"); }
+                }));
+                ac.addView(outlineButton("✕ Cancel করুন", RED, new View.OnClickListener() {
+                    @Override public void onClick(View v) { changeOrderStatus(o, "cancelled"); }
+                }));
+            } else {
+                ac.addView(text("এই অর্ডারের স্ট্যাটাস আর বদলানো যাবে না।", 14, TEXT2, false));
+            }
+            final EditText msgInput = new EditText(this);
+            msgInput.setHint("অ্যাডমিন মেসেজ লিখুন…");
+            msgInput.setTextSize(15);
+            msgInput.setInputType(InputType.TYPE_CLASS_TEXT | InputType.TYPE_TEXT_FLAG_MULTI_LINE);
+            msgInput.setMinLines(2);
+            msgInput.setBackground(roundedBorder(SOFT, 12));
+            msgInput.setPadding(dp(12), dp(10), dp(12), dp(10));
+            if (o.adminMessage != null) msgInput.setText(o.adminMessage);
+            ac.addView(msgInput);
+            ac.addView(primaryButton("অ্যাডমিন মেসেজ সেভ করুন", new View.OnClickListener() {
+                @Override public void onClick(View v) {
+                    final String msg = msgInput.getText().toString().trim();
+                    if (demoMode) {
+                        o.adminMessage = msg;
+                        notice = "ডেমো: অ্যাডমিন মেসেজ সেভ হয়েছে (লাইভে যায়নি)।";
+                        render();
+                        return;
+                    }
+                    java.util.Map<String, Object> updates = new java.util.HashMap<String, Object>();
+                    updates.put("adminMessage", msg);
+                    FirebaseAuthHelper.updateOrderFields(o.id, updates,
+                        new FirebaseAuthHelper.ResultCallback<Boolean>() {
+                            @Override public void onSuccess(Boolean ok) {
+                                o.adminMessage = msg;
+                                notice = "অ্যাডমিন মেসেজ সেভ হয়েছে।";
+                                render();
+                            }
+                            @Override public void onError(String message) {
+                                Toast.makeText(MainActivity.this, message, Toast.LENGTH_LONG).show();
+                            }
+                        });
+                }
+            }));
+            content.addView(ac);
+        } else {
+            LinearLayout nc = card();
+            nc.addView(text("স্ট্যাটাস শুধু অ্যাডমিন বদলাতে পারবেন। আপনার কিছু জানার থাকলে লিড চ্যাটে লিখুন।", 13, TEXT2, false));
+            content.addView(nc);
+        }
+        if (o.adminMessage != null && o.adminMessage.length() > 0) {
+            LinearLayout mc = card();
+            mc.addView(text("অ্যাডমিন মেসেজ", 16, TEXT, true));
+            mc.addView(text(o.adminMessage, 14, TEXT, false));
+            content.addView(mc);
+        }
+    }
+
+    private void changeOrderStatus(final OrderStore.Order o, final String newStatus) {
+        if (demoMode) {
+            o.status = newStatus;
+            if ("in_progress".equals(newStatus) && (o.startDate == null || o.startDate.length() == 0))
+                o.startDate = "ডেমো";
+            if ("completed".equals(newStatus)) o.completionDate = "ডেমো";
+            notice = "ডেমো: স্ট্যাটাস " + o.statusBn() + " হয়েছে (লাইভে যায়নি)।";
+            render();
+            return;
+        }
+        java.util.Map<String, Object> updates = new java.util.HashMap<String, Object>();
+        updates.put("status", newStatus);
+        if ("in_progress".equals(newStatus) && (o.startDate == null || o.startDate.length() == 0)) {
+            java.text.SimpleDateFormat f = new java.text.SimpleDateFormat(
+                "yyyy-MM-dd'T'HH:mm:ss.SSS'Z'", java.util.Locale.US);
+            f.setTimeZone(java.util.TimeZone.getTimeZone("UTC"));
+            updates.put("startDate", f.format(new java.util.Date()));
+        }
+        if ("completed".equals(newStatus)) {
+            java.text.SimpleDateFormat f = new java.text.SimpleDateFormat(
+                "yyyy-MM-dd'T'HH:mm:ss.SSS'Z'", java.util.Locale.US);
+            f.setTimeZone(java.util.TimeZone.getTimeZone("UTC"));
+            updates.put("completionDate", f.format(new java.util.Date()));
+        }
+        FirebaseAuthHelper.updateOrderFields(o.id, updates,
+            new FirebaseAuthHelper.ResultCallback<Boolean>() {
+                @Override public void onSuccess(Boolean ok) {
+                    o.status = newStatus;
+                    if (updates.containsKey("startDate")) o.startDate = String.valueOf(updates.get("startDate"));
+                    if (updates.containsKey("completionDate")) o.completionDate = String.valueOf(updates.get("completionDate"));
+                    deriveMySubscription();
+                    notice = "স্ট্যাটাস " + o.statusBn() + " হয়েছে।";
+                    render();
+                }
+                @Override public void onError(String message) {
+                    Toast.makeText(MainActivity.this, message, Toast.LENGTH_LONG).show();
+                }
+            });
+    }
+
+    private void showOrderForm() {
+        content.addView(ghostButton("← অর্ডারে ফিরুন", new View.OnClickListener() {
+            @Override public void onClick(View v) { go(S_ORDERS, false); }
+        }));
+        content.addView(text("নতুন অর্ডার", 24, NAVY, true));
+        final boolean admin = !demoMode && FirebaseAuthHelper.isAdmin();
+        if (admin) {
+            LinearLayout ruleNote = card();
+            ruleNote.setBackground(rounded(AMBER_SOFT, 20));
+            ruleNote.addView(text("এই অর্ডার আপনার নিজের অ্যাকাউন্টে তৈরি হবে। অন্য কাস্টমারের অ্যাকাউন্টে অর্ডার/সাবস্ক্রিপশন যোগ করতে Firestore rules আপডেট লাগবে — সেটা আলাদা পেন্ডিং টাস্ক, এখনো করা হয়নি।", 13, TEXT, false));
+            content.addView(ruleNote);
+        }
+        if (selectedPackage == null) {
+            // Step 1: pick a package (verified prices only, amount auto-filled).
+            content.addView(text("প্যাকেজ বেছে নিন — দাম নিজে থেকে বসবে, বানিয়ে লেখা যাবে না।", 14, TEXT2, false));
+            for (final OrderStore.OrderPackage pkg : OrderStore.PACKAGES) {
+                LinearLayout c = card();
+                c.addView(text(pkg.service, 17, TEXT, true));
+                LinearLayout row = new LinearLayout(this);
+                row.setOrientation(LinearLayout.HORIZONTAL);
+                row.setPadding(0, dp(6), 0, 0);
+                row.addView(chip(pkg.pkg, SOFT_BLUE, PRIMARY));
+                TextView pr = text("  " + pkg.price, 18, PRIMARY, true);
+                row.addView(pr);
+                c.addView(row);
+                if ("monthly".equals(pkg.billing)) {
+                    c.addView(text("মাসিক সাবস্ক্রিপশন — অর্ডার হলে কত দিন বাকি আছে দেখা যাবে।", 13, TEXT2, false));
+                } else if ("one_time".equals(pkg.billing)) {
+                    c.addView(text("এককালীন — দিনের হিসাব দেখানো হয় না (আলাদা ফাংশন পরে ঠিক করা হবে)।", 13, TEXT2, false));
+                }
+                c.addView(primaryButton("এই প্যাকেজ দিয়ে অর্ডার করুন", new View.OnClickListener() {
+                    @Override public void onClick(View v) { selectedPackage = pkg; render(); }
+                }));
+                content.addView(c);
+            }
+            return;
+        }
+        // Step 2: payment form (buyer's own payment details, like website).
+        final OrderStore.OrderPackage pkg = selectedPackage;
+        LinearLayout pc = card();
+        pc.addView(text(pkg.service, 18, NAVY, true));
+        pc.addView(text(pkg.pkg + "  •  " + pkg.price, 16, PRIMARY, true));
+        pc.addView(text("অ্যামাউন্ট নিজে থেকে বসেছে — প্যাকেজের দামই অর্ডারের অ্যামাউন্ট।", 13, TEXT2, false));
+        content.addView(pc);
+        LinearLayout fc = card();
+        // Payment number first, above the payment-method selector and the
+        // senderPhone/trxId fields, exactly like the website OrderModal.
+        fc.addView(paymentInfoCard());
+        final android.widget.Spinner methodSpinner = new android.widget.Spinner(this);
+        String[] methods = new String[]{"bkash — bKash", "nagad — Nagad"};
+        android.widget.ArrayAdapter<String> adapter = new android.widget.ArrayAdapter<String>(
+            this, android.R.layout.simple_spinner_item, methods);
+        adapter.setDropDownViewResource(android.R.layout.simple_spinner_dropdown_item);
+        methodSpinner.setAdapter(adapter);
+        fc.addView(text("পেমেন্ট মাধ্যম", 14, TEXT, true));
+        fc.addView(methodSpinner);
+        final EditText senderInput = new EditText(this);
+        senderInput.setHint("আপনার Sender নম্বর (যে নম্বর থেকে পাঠিয়েছেন)");
+        senderInput.setTextSize(15);
+        senderInput.setInputType(InputType.TYPE_CLASS_PHONE);
+        senderInput.setBackground(roundedBorder(SOFT, 12));
+        senderInput.setPadding(dp(12), dp(10), dp(12), dp(10));
+        fc.addView(text("Sender নম্বর *", 14, TEXT, true));
+        fc.addView(senderInput);
+        final EditText trxInput = new EditText(this);
+        trxInput.setHint("TrxID (যেমন: 8N7A6...)");
+        trxInput.setTextSize(15);
+        trxInput.setInputType(InputType.TYPE_CLASS_TEXT);
+        trxInput.setBackground(roundedBorder(SOFT, 12));
+        trxInput.setPadding(dp(12), dp(10), dp(12), dp(10));
+        fc.addView(text("TrxID *", 14, TEXT, true));
+        fc.addView(trxInput);
+        final EditText pageInput = new EditText(this);
+        pageInput.setHint("আপনার ফেসবুক পেজের লিংক (ঐচ্ছিক)");
+        pageInput.setTextSize(15);
+        pageInput.setInputType(InputType.TYPE_CLASS_TEXT);
+        pageInput.setBackground(roundedBorder(SOFT, 12));
+        pageInput.setPadding(dp(12), dp(10), dp(12), dp(10));
+        fc.addView(text("পেজ লিংক (ঐচ্ছিক)", 14, TEXT, true));
+        fc.addView(pageInput);
+        final EditText reqInput = new EditText(this);
+        reqInput.setHint("আপনার চাহিদা / নির্দেশনা (ঐচ্ছিক)");
+        reqInput.setTextSize(15);
+        reqInput.setInputType(InputType.TYPE_CLASS_TEXT | InputType.TYPE_TEXT_FLAG_MULTI_LINE);
+        reqInput.setMinLines(2);
+        reqInput.setBackground(roundedBorder(SOFT, 12));
+        reqInput.setPadding(dp(12), dp(10), dp(12), dp(10));
+        fc.addView(text("চাহিদা (ঐচ্ছিক)", 14, TEXT, true));
+        fc.addView(reqInput);
+        fc.addView(primaryButton("অর্ডার করুন — স্ট্যাটাস Pending হবে", new View.OnClickListener() {
+            @Override public void onClick(View v) {
+                String sender = senderInput.getText().toString().trim();
+                String trx = trxInput.getText().toString().trim().toUpperCase();
+                if (sender.length() == 0 || trx.length() == 0) {
+                    Toast.makeText(MainActivity.this,
+                        "Sender নম্বর আর TrxID — দুটোই লাগবে।", Toast.LENGTH_LONG).show();
+                    return;
+                }
+                String method = methodSpinner.getSelectedItemPosition() == 1 ? "nagad" : "bkash";
+                String pageLink = pageInput.getText().toString().trim();
+                String reqs = reqInput.getText().toString().trim();
+                String uid = FirebaseAuthHelper.currentUid();
+                String name = FirebaseAuthHelper.currentDisplayName();
+                if (name == null || name.length() == 0) name = "কাস্টমার";
+                if (demoMode || uid == null) {
+                    OrderStore.Order demo = new OrderStore.Order(
+                        String.valueOf(System.currentTimeMillis()), "demo-user", name,
+                        pkg.service, pkg.pkg, pkg.price, method, sender, trx,
+                        "pending", "ডেমো তারিখ", System.currentTimeMillis(),
+                        pageLink, reqs, pkg.billing);
+                    orders.add(0, demo);
+                    ordersLoaded = true;
+                    deriveMySubscription();
+                    currentOrder = demo;
+                    selectedPackage = null;
+                    notice = "ডেমো অর্ডার তৈরি হয়েছে — স্ট্যাটাস Pending (লাইভে যায়নি)।";
+                    go(S_ORDER_DETAIL, true);
+                    return;
+                }
+                final String fUid = uid;
+                final String fName = name;
+                final OrderStore.Order order = new OrderStore.Order(
+                    String.valueOf(System.currentTimeMillis()), fUid, fName,
+                    pkg.service, pkg.pkg, pkg.price, method, sender, trx,
+                    "pending", "", System.currentTimeMillis(),
+                    pageLink, reqs, pkg.billing);
+                FirebaseAuthHelper.createOrder(order,
+                    new FirebaseAuthHelper.ResultCallback<Boolean>() {
+                        @Override public void onSuccess(Boolean ok) {
+                            orders.add(0, order);
+                            ordersLoaded = true;
+                            deriveMySubscription();
+                            currentOrder = order;
+                            selectedPackage = null;
+                            notice = "অর্ডার করা হয়েছে — স্ট্যাটাস Pending, অ্যাডমিন অনুমোদন দিলে চলমান হবে।";
+                            go(S_ORDER_DETAIL, true);
+                        }
+                        @Override public void onError(String message) {
+                            Toast.makeText(MainActivity.this, message, Toast.LENGTH_LONG).show();
+                        }
+                    });
+            }
+        }));
+        fc.addView(outlineButton("অন্য প্যাকেজ বেছে নিন", PRIMARY, new View.OnClickListener() {
+            @Override public void onClick(View v) { selectedPackage = null; render(); }
+        }));
+        content.addView(fc);
+        content.addView(text("এই ফর্মে আপনার নিজের পেমেন্ট তথ্য (Sender নম্বর + TrxID) নেওয়া হয় — ওয়েবসাইটের অর্ডার ফর্মের মতোই। পেমেন্ট নম্বরটি উপরে দেখানো হয়েছে; এছাড়া AutoMateIQ-এর অন্য কোনো নম্বর/ইমেইল এখানে দেখানো হয় না।", 12, TEXT2, false));
+    }
+
+    private void showRechargeForm() {
+        content.addView(ghostButton("← টোকেনে ফিরুন", new View.OnClickListener() {
+            @Override public void onClick(View v) { go(S_TOKENS, false); }
+        }));
+        content.addView(text("টোকেন রিচার্জ — এপিআই ক্রেডিট", 24, NAVY, true));
+        final String amount = selectedTokenAmount == null ? "৳২০০" : selectedTokenAmount;
+        LinearLayout pc = card();
+        pc.addView(text("রিচার্জ অ্যামাউন্ট: " + amount, 18, PRIMARY, true));
+        pc.addView(text("এটি সাবস্ক্রিপশন নয় — দিনের হিসাব এখানে নেই। অ্যাডমিন অনুমোদনের পর ক্রেডিট যোগ হবে। মেয়াদ শেষ হয় না, Pay As You Go।", 13, TEXT2, false));
+        content.addView(pc);
+        LinearLayout fc = card();
+        // Same payment number as the order form: the customer must send
+        // money here first, before filling senderPhone/trxId below.
+        fc.addView(paymentInfoCard());
+        final android.widget.Spinner methodSpinner = new android.widget.Spinner(this);
+        String[] methods = new String[]{"bkash — bKash", "nagad — Nagad"};
+        android.widget.ArrayAdapter<String> adapter = new android.widget.ArrayAdapter<String>(
+            this, android.R.layout.simple_spinner_item, methods);
+        adapter.setDropDownViewResource(android.R.layout.simple_spinner_dropdown_item);
+        methodSpinner.setAdapter(adapter);
+        fc.addView(text("পেমেন্ট মাধ্যম", 14, TEXT, true));
+        fc.addView(methodSpinner);
+        final EditText senderInput = new EditText(this);
+        senderInput.setHint("আপনার Sender নম্বর");
+        senderInput.setTextSize(15);
+        senderInput.setInputType(InputType.TYPE_CLASS_PHONE);
+        senderInput.setBackground(roundedBorder(SOFT, 12));
+        senderInput.setPadding(dp(12), dp(10), dp(12), dp(10));
+        fc.addView(text("Sender নম্বর *", 14, TEXT, true));
+        fc.addView(senderInput);
+        final EditText trxInput = new EditText(this);
+        trxInput.setHint("TrxID");
+        trxInput.setTextSize(15);
+        trxInput.setInputType(InputType.TYPE_CLASS_TEXT);
+        trxInput.setBackground(roundedBorder(SOFT, 12));
+        trxInput.setPadding(dp(12), dp(10), dp(12), dp(10));
+        fc.addView(text("TrxID *", 14, TEXT, true));
+        fc.addView(trxInput);
+        fc.addView(primaryButton("রিচার্জ রিকোয়েস্ট পাঠান (Pending থাকবে)", new View.OnClickListener() {
+            @Override public void onClick(View v) {
+                String sender = senderInput.getText().toString().trim();
+                String trx = trxInput.getText().toString().trim().toUpperCase();
+                if (sender.length() == 0 || trx.length() == 0) {
+                    Toast.makeText(MainActivity.this,
+                        "Sender নম্বর আর TrxID — দুটোই লাগবে।", Toast.LENGTH_LONG).show();
+                    return;
+                }
+                String method = methodSpinner.getSelectedItemPosition() == 1 ? "nagad" : "bkash";
+                String digits = amount.replaceAll("[^0-9]", "");
+                String uid = FirebaseAuthHelper.currentUid();
+                String name = FirebaseAuthHelper.currentDisplayName();
+                if (name == null || name.length() == 0) name = "কাস্টমার";
+                if (demoMode || uid == null) {
+                    notice = "ডেমো রিচার্জ রিকোয়েস্ট তৈরি হয়েছে — স্ট্যাটাস Pending (লাইভে যায়নি)।";
+                    go(S_TOKENS, true);
+                    return;
+                }
+                FirebaseAuthHelper.createRecharge(uid, name, digits, method, sender, trx,
+                    new FirebaseAuthHelper.ResultCallback<Boolean>() {
+                        @Override public void onSuccess(Boolean ok) {
+                            notice = "রিচার্জ রিকোয়েস্ট পাঠানো হয়েছে — স্ট্যাটাস Pending, অ্যাডমিন অনুমোদনের পর ক্রেডিট যোগ হবে।";
+                            go(S_TOKENS, true);
+                        }
+                        @Override public void onError(String message) {
+                            Toast.makeText(MainActivity.this, message, Toast.LENGTH_LONG).show();
+                        }
+                    });
+            }
+        }));
+        content.addView(fc);
     }
 
     private void toggleLeadPause(final LeadsStore.Lead lead) {
@@ -1442,8 +2160,17 @@ public class MainActivity extends Activity {
         }
         content.addView(ben);
 
-        content.addView(primaryButton("ওয়েবসাইট থেকে অর্ডার করুন", new View.OnClickListener() {
-            @Override public void onClick(View v) { openUrl(LiveDataClient.WEBSITE_URL); }
+        content.addView(primaryButton("অ্যাপেই অর্ডার করুন", new View.OnClickListener() {
+            @Override public void onClick(View v) {
+                // v6: ordering happens IN-APP, never via the website.
+                // Default to this service's first (monthly) package;
+                // the form's "other package" button can change it.
+                selectedPackage = null;
+                for (OrderStore.OrderPackage pkg : OrderStore.PACKAGES) {
+                    if (pkg.service.equals(s.name)) { selectedPackage = pkg; break; }
+                }
+                go(S_ORDER_FORM, true);
+            }
         }));
         content.addView(outlineButton("মেসেঞ্জারে জিজ্ঞাসা করুন", PRIMARY,
             new View.OnClickListener() {
@@ -1467,8 +2194,11 @@ public class MainActivity extends Activity {
             row.addView(dur);
             c.addView(row);
             c.addView(text(p.price, 22, PRIMARY, true));
-            c.addView(primaryButton("কিনুন / অর্ডার করুন", new View.OnClickListener() {
-                @Override public void onClick(View v) { openUrl(LiveDataClient.WEBSITE_URL); }
+            c.addView(primaryButton("কিনুন / অ্যাপেই অর্ডার করুন", new View.OnClickListener() {
+                @Override public void onClick(View v) {
+                    selectedPackage = findMonthlyPackage(p.service, p.pkg);
+                    go(S_ORDER_FORM, true);
+                }
             }));
             content.addView(c);
         }
@@ -1502,8 +2232,11 @@ public class MainActivity extends Activity {
             row.addView(spacer, rp);
             row.addView(chip("রিচার্জ", GREEN_SOFT, GREEN));
             c.addView(row);
-            c.addView(primaryButton("এই অ্যামাউন্ট রিচার্জ করুন", new View.OnClickListener() {
-                @Override public void onClick(View v) { openUrl(LiveDataClient.WEBSITE_URL); }
+            c.addView(primaryButton("এই অ্যামাউন্ট রিচার্জ করুন (অ্যাপেই)", new View.OnClickListener() {
+                @Override public void onClick(View v) {
+                    selectedTokenAmount = amount;
+                    go(S_RECHARGE_FORM, true);
+                }
             }));
             content.addView(c);
         }
@@ -1517,6 +2250,30 @@ public class MainActivity extends Activity {
 
     private void showMySubscription() {
         content.addView(text("আমার সাবস্ক্রিপশন", 24, NAVY, true));
+        // v6: subscription is DERIVED FROM REAL ORDERS, never demo by
+        // default. Latest monthly, non-cancelled order wins.
+        if (!demoMode && ordersLoaded) {
+            SubscriptionStore.Subscription derived =
+                OrderStore.subscriptionFromOrders(orders);
+            mySubscription = derived;
+            mySubscriptionOrderStatus = "";
+            if (derived != null) {
+                for (OrderStore.Order o : orders) {
+                    if (o.isMonthly() && !"cancelled".equals(o.status)
+                        && !"rejected".equals(o.status)
+                        && o.dateMillis == derived.startMillis) {
+                        mySubscriptionOrderStatus = o.status;
+                        break;
+                    }
+                }
+            }
+        }
+        if (!demoMode && signedIn && !ordersLoaded) {
+            content.addView(bannerCard("অর্ডার লোড হচ্ছে… রিফ্রেশ চাপলে আবার আনা হবে।", SOFT_BLUE, PRIMARY));
+            content.addView(outlineButton("🔄 অর্ডার রিফ্রেশ করুন", PRIMARY, new View.OnClickListener() {
+                @Override public void onClick(View v) { loadLiveOrders(); render(); }
+            }));
+        }
         if (demoMode) {
             content.addView(bannerCard("🧪 ডেমো প্রিভিউ — এটি আসল সাবস্ক্রিপশন নয়", AMBER_SOFT, AMBER));
         }
@@ -1553,8 +2310,14 @@ public class MainActivity extends Activity {
                 : chip("মেয়াদ শেষ", RED_SOFT, RED));
             c.addView(srow);
             content.addView(c);
-            content.addView(primaryButton("রিনিউ / অর্ডার করুন", new View.OnClickListener() {
-                @Override public void onClick(View v) { openUrl(LiveDataClient.WEBSITE_URL); }
+            if ("pending".equals(mySubscriptionOrderStatus)) {
+                LinearLayout warn = card();
+                warn.setBackground(rounded(AMBER_SOFT, 20));
+                warn.addView(text("অর্ডারটি Pending — অ্যাডমিন অনুমোদন দিলে সার্ভিস সক্রিয় হবে। দিনের হিসাব অর্ডারের তারিখ থেকেই ধরা হয়েছে।", 13, TEXT, false));
+                content.addView(warn);
+            }
+            content.addView(primaryButton("রিনিউ / আবার অর্ডার করুন (অ্যাপেই)", new View.OnClickListener() {
+                @Override public void onClick(View v) { selectedPackage = null; go(S_ORDER_FORM, true); }
             }));
         }
     }
@@ -1588,7 +2351,7 @@ public class MainActivity extends Activity {
         content.addView(outlineButton("ওয়েবসাইট খুলুন", PRIMARY, new View.OnClickListener() {
             @Override public void onClick(View v) { openUrl(LiveDataClient.WEBSITE_URL); }
         }));
-        TextView ver = text("ভার্সন 5.0 • ইন-অ্যাপ Firebase লগইন • লগইন কখনো ওয়েবসাইটে যাবে না", 12, TEXT2, false);
+        TextView ver = text("ভার্সন 6.0 • ইন-অ্যাপ Firebase লগইন • ইন-অ্যাপ অর্ডার • লগইন কখনো ওয়েবসাইটে যাবে না", 12, TEXT2, false);
         ver.setGravity(Gravity.CENTER);
         ver.setPadding(0, dp(8), 0, 0);
         content.addView(ver);
