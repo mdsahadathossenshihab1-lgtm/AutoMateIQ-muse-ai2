@@ -69,6 +69,13 @@ export const translations = {
       social: 'সোশ্যাল মিডিয়া',
       copyright: 'সর্বস্বত্ব সংরক্ষিত।'
     },
+    app_download: {
+      title: 'AutoMateIQ অ্যাপ ডাউনলোড করুন',
+      subtitle: 'আপনার Android ফোনে সরাসরি আমাদের ওয়েবসাইট ব্যবহার করুন — লগইন, ড্যাশবোর্ড, অর্ডার, Messenger Leads, Wallet এবং Inbox সব এক জায়গায়।',
+      btn: 'APK ডাউনলোড করুন (Android)',
+      not_play: 'এটি Play Store থেকে নয়, সরাসরি APK ডাউনলোড।',
+      note: 'নোট: Android ডাউনলোডের পর ব্রাউজার থেকে ইনস্টল করার অনুমতি চাইতে পারে — “Allow install from browser / unknown sources” অনুমতি দিলে ইনস্টল হবে।'
+    },
     auth: {
       login_title: 'লগইন করুন',
       register_title: 'অ্যাকাউন্ট খুলুন',
@@ -228,6 +235,13 @@ export const translations = {
       quick_links: 'Quick Links',
       social: 'Social Media',
       copyright: 'All rights reserved.'
+    },
+    app_download: {
+      title: 'Download the AutoMateIQ App',
+      subtitle: 'Use our website directly on your Android phone — login, dashboard, orders, Messenger Leads, Wallet and Inbox, all in one place.',
+      btn: 'Download APK (Android)',
+      not_play: 'This is a direct APK download, not from the Play Store.',
+      note: 'Note: Android may ask you to allow install from browser / unknown sources after downloading — allow it to install the app.'
     },
     auth: {
       login_title: 'Login',

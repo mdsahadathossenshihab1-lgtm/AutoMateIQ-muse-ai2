@@ -15,7 +15,7 @@ import Logo from './components/Logo';
 import { AuthProvider, useAuth } from './AuthContext';
 import { LanguageProvider, useLanguage } from './LanguageContext';
 import { PricingPackage, ServiceDetailContent } from './types';
-import { Facebook, Youtube, Mail, Phone, LayoutDashboard, LogIn, LogOut, Menu, Globe, ArrowRight, X, MapPin, Zap, Bot, Database, Globe as GlobeIcon, Code, CheckCircle2, FileCode, Cpu, MessageSquare, Share2, Activity, ShieldCheck, Play, Sparkles, Send, TrendingUp, Users } from 'lucide-react';
+import { Facebook, Youtube, Mail, Phone, LayoutDashboard, LogIn, LogOut, Menu, Globe, ArrowRight, X, MapPin, Zap, Bot, Database, Globe as GlobeIcon, Code, CheckCircle2, FileCode, Cpu, MessageSquare, Share2, Activity, ShieldCheck, Play, Sparkles, Send, TrendingUp, Users, Download } from 'lucide-react';
 import { trackPixelEvent } from './services/pixelService';
 import { getUserLocation } from './services/locationService';
 import { db } from './services/supabaseClient';
@@ -600,6 +600,25 @@ const AppContent: React.FC = () => {
         </div>
       </section>
 
+      {/* App Download Section — direct Android APK, NOT Play Store.
+          On deploy, place the built APK at public/app/automateiq-app.apk
+          so this link resolves to
+          https://auto-mate-iq-muse-ai2.vercel.app/app/automateiq-app.apk */}
+      <section id="app-download" className="py-16 bg-slate-50">
+        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 text-center">
+          <h2 className="text-3xl font-bold mb-3">{t('app_download.title')}</h2>
+          <p className="text-slate-600 mb-6 max-w-2xl mx-auto">{t('app_download.subtitle')}</p>
+          <a
+            href="/app/automateiq-app.apk"
+            className="inline-flex items-center gap-2 px-8 py-3 bg-blue-600 hover:bg-blue-500 text-white font-bold rounded-full transition-all"
+          >
+            <Download size={18} /> {t('app_download.btn')}
+          </a>
+          <p className="text-slate-500 text-sm mt-4">{t('app_download.not_play')}</p>
+          <p className="text-slate-500 text-xs mt-2 max-w-2xl mx-auto">{t('app_download.note')}</p>
+        </div>
+      </section>
+
       {/* Modern Footer */}
       <footer className="bg-slate-900/95 backdrop-blur-xl text-white pt-24 pb-12 relative overflow-hidden">
         <div className="absolute top-0 left-0 w-full h-px bg-gradient-to-r from-transparent via-slate-700 to-transparent"></div>
@@ -638,6 +657,7 @@ const AppContent: React.FC = () => {
                 <li><button onClick={() => window.scrollTo(0,0)} className="text-slate-400 hover:text-blue-400 text-sm transition-colors">{t('nav.home')}</button></li>
                 <li><button onClick={() => document.getElementById('services')?.scrollIntoView()} className="text-slate-400 hover:text-blue-400 text-sm transition-colors">{t('nav.services')}</button></li>
                 <li><button onClick={scrollToPricing} className="text-slate-400 hover:text-blue-400 text-sm transition-colors">{t('nav.pricing')}</button></li>
+                <li><button onClick={() => document.getElementById('app-download')?.scrollIntoView()} className="text-slate-400 hover:text-blue-400 text-sm transition-colors">{t('app_download.title')}</button></li>
                 <li><button onClick={() => setContentPage('faq')} className="text-slate-400 hover:text-blue-400 text-sm transition-colors">FAQ</button></li>
               </ul>
             </div>
