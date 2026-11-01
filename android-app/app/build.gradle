@@ -11,8 +11,8 @@ android {
         applicationId "com.automateiq.app"
         minSdk 24
         targetSdk 34
-        versionCode 11
-        versionName "7.0"
+        versionCode 12
+        versionName "8.0"
     }
 
     buildTypes {
