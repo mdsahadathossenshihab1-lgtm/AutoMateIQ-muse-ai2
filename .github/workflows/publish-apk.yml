@@ -1,0 +1,40 @@
+name: Publish APK to public/app
+on:
+  workflow_dispatch:
+    inputs:
+      run_id:
+        description: 'Build APK run ID'
+        required: true
+        type: string
+  workflow_run:
+    workflows: ['Build APK']
+    types: [completed]
+    branches: [main]
+permissions:
+  contents: write
+  actions: read
+jobs:
+  publish:
+    if: ${{ github.event_name == 'workflow_dispatch' || github.event.workflow_run.conclusion == 'success' }}
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          name: automateiq-app-debug
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          run-id: ${{ inputs.run_id || github.event.workflow_run.id }}
+      - name: Publish APK
+        run: |
+          ls -l
+          APK=$(find . -maxdepth 2 -type f -name 'app-debug.apk' | head -n 1)
+          test -n "$APK"
+          cp "$APK" public/app/automateiq-app.apk
+          ls -lh public/app/automateiq-app.apk
+      - name: Commit APK
+        run: |
+          git config user.name 'github-actions[bot]'
+          git config user.email 'github-actions[bot]@users.noreply.github.com'
+          git add public/app/automateiq-app.apk
+          git diff --cached --quiet || git commit -m 'Update AutoMateIQ APK to native v2.0 (GitHub Actions Gradle build)'
+          git push
