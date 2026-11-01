@@ -1,5 +1,6 @@
 plugins {
     id 'com.android.application'
+    id 'com.google.gms.google-services'
 }
 
 android {
@@ -10,8 +11,8 @@ android {
         applicationId "com.automateiq.app"
         minSdk 24
         targetSdk 34
-        versionCode 7
-        versionName "3.0"
+        versionCode 8
+        versionName "4.0"
     }
 
     buildTypes {
@@ -25,4 +26,16 @@ android {
         sourceCompatibility JavaVersion.VERSION_1_8
         targetCompatibility JavaVersion.VERSION_1_8
     }
+}
+
+dependencies {
+    // Firebase — SAME project as the website. The project/database are
+    // selected in code (FirebaseAuthHelper.DATABASE_ID), never by a secret
+    // in the app. google-services.json (real file, from Firebase Console)
+    // must sit in app/ at build time; without it the login button shows
+    // the in-app "Firebase setup pending" message and never falls back
+    // to a website redirect.
+    implementation 'com.google.firebase:firebase-auth:23.0.0'
+    implementation 'com.google.firebase:firebase-firestore:25.1.0'
+    implementation 'com.google.android.gms:play-services-auth:21.0.0'
 }
