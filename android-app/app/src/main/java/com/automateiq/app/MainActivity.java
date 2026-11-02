@@ -1,6 +1,18 @@
 package com.automateiq.app;
 
 import android.app.Activity;
+import android.app.Notification;
+import android.app.NotificationChannel;
+import android.app.NotificationManager;
+import android.app.PendingIntent;
+import android.content.pm.PackageManager;
+import android.os.Build;
+
+import androidx.work.Constraints;
+import androidx.work.ExistingPeriodicWorkPolicy;
+import androidx.work.NetworkType;
+import androidx.work.PeriodicWorkRequest;
+import androidx.work.WorkManager;
 import android.animation.ObjectAnimator;
 import android.animation.ArgbEvaluator;
 import android.animation.ValueAnimator;
@@ -31,9 +43,10 @@ import android.widget.Toast;
 
 import java.util.ArrayList;
 import java.util.List;
+import java.util.concurrent.TimeUnit;
 
 /**
- * AutoMateIQ Mobile Dashboard v8.1 — SAME-TO-SAME to approved design v3 (2026-11-02): every colour, gradient, radius, padding, structure and animation below is taken from design-prototype-v3.html, not an approximation of it. Backend kept from v8/v7.
+ * AutoMateIQ Mobile Dashboard v8.2 — SAME-TO-SAME to approved design v3 (UI unchanged from v8.1). v8.2 fixes: send status follows the reply service answer (never the follow-up reload), per-thread in-flight guard, unknown-outcome refresh-first flow, in-app notifications (banner + nav badges + local notification; no closed-app push), and plain-language page onboarding with an optional Page ID and an empty admin profile link placeholder.
  * (2026-11-02): aurora/glass skin, vector icons, v3 typography scale and
  * subtle entry/press/progress animations, with plain user language in
  * every visible string. Backend kept from v7: role gating (admin panel
@@ -180,6 +193,33 @@ public class MainActivity extends Activity {
     private int autoExpireCount = 0;
     private boolean autoExpireRunForLoad = false;
 
+    // ---- v8.2: SEND GUARD + IN-APP NOTIFICATIONS + ONBOARDING ----
+    // Admin profile link, supplied by the user 2026-11-02 08:31: his
+    // own Facebook profile. The onboarding button opens EXACTLY this
+    // link — never a guessed link, never a screenshot. The empty-link
+    // fallback below stays only as a safety net if this is ever
+    // cleared again.
+    private static final String ADMIN_PROFILE_LINK = "https://www.facebook.com/ShShihab63";
+    private static final int RC_NOTIFICATIONS = 9002;
+    private static final String NOTIF_CHANNEL_ID = "automateiq_updates";
+    // Per-thread in-flight sends (docId set): duplicate taps for the
+    // same thread are ignored; other threads are unaffected.
+    private java.util.Set<String> sendInFlightDocs = new java.util.HashSet<String>();
+    // Unread state for badges (in-memory; recomputed from stored
+    // seen/notified fingerprints on every load, so it survives restart).
+    private java.util.Set<String> unreadLeadDocIds = new java.util.HashSet<String>();
+    private java.util.Set<String> unreadOrderIds = new java.util.HashSet<String>();
+    // One banner per new item: shown until tapped or its thread/order
+    // is opened. Never re-raised for the same item (see detect methods).
+    private String pendingBannerText = null;
+    private LeadsStore.Lead pendingBannerLead = null;
+    private OrderStore.Order pendingBannerOrder = null;
+    // v8.2 closed-app: notification tap targets, delivered via intent
+    // extras (worker / FCM service). Opened once the matching load
+    // finishes; cleared if the item is not found for this account.
+    private String pendingOpenLeadDoc = null;
+    private String pendingOpenOrderId = null;
+
     // ---- Services (verified app prices only) ----
     private static class Service {
         String icon, name, desc, from, color;
@@ -245,9 +285,16 @@ public class MainActivity extends Activity {
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
         buildShell();
+        // v8.2 closed-app: remember a notification tap target, and
+        // (re)schedule the periodic check. KEEP policy: re-scheduling
+        // never duplicates the worker.
+        readNotificationIntent(getIntent());
+        scheduleUpdateWorker();
         // Resume an existing sign-in session in-app (no app involved).
         if (FirebaseAuthHelper.currentUser() != null) {
             signedIn = true;
+            maybeRequestNotificationPermission();
+            storeFcmToken();
             loadLiveLeads();
             loadLiveOrders();
             if (FirebaseAuthHelper.isAdmin()) loadLiveUsers();
@@ -266,6 +313,8 @@ public class MainActivity extends Activity {
                     @Override public void onSuccess(com.google.firebase.auth.FirebaseUser user) {
                         signedIn = true;
                                     loginError = null;
+                        maybeRequestNotificationPermission();
+                        storeFcmToken();
                         loadLiveLeads();
                         loadLiveOrders();
                         if (FirebaseAuthHelper.isAdmin()) loadLiveUsers();
@@ -277,6 +326,106 @@ public class MainActivity extends Activity {
                     }
                 });
         }
+    }
+
+    // v8.2 closed-app: a notification tap while the app already lives
+    // re-delivers here instead of recreating the activity.
+    @Override
+    protected void onNewIntent(Intent intent) {
+        super.onNewIntent(intent);
+        setIntent(intent);
+        readNotificationIntent(intent);
+        if (signedIn) {
+            loadLiveLeads();
+            loadLiveOrders();
+        }
+    }
+
+    private void readNotificationIntent(Intent intent) {
+        if (intent == null) return;
+        String leadDoc = intent.getStringExtra("open_lead_doc");
+        String orderId = intent.getStringExtra("open_order_id");
+        if (leadDoc != null && leadDoc.length() > 0) pendingOpenLeadDoc = leadDoc;
+        if (orderId != null && orderId.length() > 0) pendingOpenOrderId = orderId;
+    }
+
+    /** Open a pending notification target once its list has loaded.
+     *  Returns true when it opened something. */
+    private boolean openPendingLeadIfAny() {
+        if (pendingOpenLeadDoc == null) return false;
+        for (LeadsStore.Lead l : leadsStore.all()) {
+            if (l.docId().equals(pendingOpenLeadDoc)) {
+                pendingOpenLeadDoc = null;
+                currentLead = l;
+                go(S_LEAD_DETAIL, true);
+                return true;
+            }
+        }
+        // Not found yet: keep it for the next load instead of
+        // dropping the tap target (it can only match this account's list).
+        return false;
+    }
+
+    private boolean openPendingOrderIfAny() {
+        if (pendingOpenOrderId == null) return false;
+        for (OrderStore.Order o : orders) {
+            if (o.id.equals(pendingOpenOrderId)) {
+                pendingOpenOrderId = null;
+                currentOrder = o;
+                go(S_ORDER_DETAIL, true);
+                return true;
+            }
+        }
+        // Not found yet: keep it for the next load (see above).
+        return false;
+    }
+
+    // v8.2 closed-app: periodic check (minimum 15 minutes, only with
+    // network). This is what delivers notifications while the app is
+    // closed; it is NOT instant push (see README + FCM service).
+    private void scheduleUpdateWorker() {
+        try {
+            Constraints constraints = new Constraints.Builder()
+                .setRequiredNetworkType(NetworkType.CONNECTED)
+                .build();
+            PeriodicWorkRequest request = new PeriodicWorkRequest.Builder(
+                UpdateWorker.class, 15, TimeUnit.MINUTES)
+                .setConstraints(constraints)
+                .build();
+            WorkManager.getInstance(this).enqueueUniquePeriodicWork(
+                "automateiq_updates", ExistingPeriodicWorkPolicy.KEEP, request);
+        } catch (Exception ignored) { }
+    }
+
+    // v8.2: keep the device token current on the signed-in user's doc
+    // so a future sender can target this device. Best-effort and
+    // silent: a failure changes nothing in the UI.
+    private void storeFcmToken() {
+        try {
+            final String uid = FirebaseAuthHelper.currentUid();
+            if (uid == null) return;
+            com.google.firebase.messaging.FirebaseMessaging.getInstance().getToken()
+                .addOnSuccessListener(new com.google.android.gms.tasks.OnSuccessListener<String>() {
+                    @Override public void onSuccess(String token) {
+                        if (token == null || token.length() == 0) return;
+                        java.util.Map<String, Object> fields = new java.util.HashMap<String, Object>();
+                        fields.put("fcmToken", token);
+                        FirebaseAuthHelper.updateUserPageFields(uid, fields,
+                            new FirebaseAuthHelper.ResultCallback<Boolean>() {
+                                @Override public void onSuccess(Boolean ok) { }
+                                @Override public void onError(String e) { }
+                            });
+                    }
+                });
+        } catch (Exception ignored) { }
+    }
+
+    // v8.2: notification permission result. Denied changes nothing:
+    // login and every screen keep working; only the in-app banner and
+    // badges still announce new items.
+    @Override
+    public void onRequestPermissionsResult(int requestCode, String[] permissions, int[] grantResults) {
+        super.onRequestPermissionsResult(requestCode, permissions, grantResults);
     }
 
     @Override
@@ -319,6 +468,17 @@ public class MainActivity extends Activity {
 
     private void go(int next, boolean push) {
         if (push) backStack.add(screen);
+        // v8.2: opening a thread/order marks it read (badges clear).
+        if (next == S_LEAD_DETAIL && currentLead != null) markLeadRead(currentLead);
+        if (next == S_ORDER_DETAIL && currentOrder != null) markOrderRead(currentOrder);
+        if (next == S_LEAD_DETAIL && pendingBannerLead != null && currentLead != null
+                && pendingBannerLead.docId().equals(currentLead.docId())) {
+            pendingBannerText = null; pendingBannerLead = null;
+        }
+        if (next == S_ORDER_DETAIL && pendingBannerOrder != null && currentOrder != null
+                && pendingBannerOrder.id.equals(currentOrder.id)) {
+            pendingBannerText = null; pendingBannerOrder = null;
+        }
         screen = gateScreen(next);
         render();
     }
@@ -335,10 +495,14 @@ public class MainActivity extends Activity {
         FirebaseAuthHelper.fetchLiveLeads(uid,
             new FirebaseAuthHelper.ResultCallback<List<LeadsStore.Lead>>() {
                 @Override public void onSuccess(List<LeadsStore.Lead> live) {
+                    detectNewLeads(live);
                     leadsStore.setLiveLeads(live);
+                    openPendingLeadIfAny();
                     leadsLoading = false;
                     leadsError = null;
-                    if (screen == S_DASH || screen == S_LEADS) render();
+                    // v8.2: a banner must appear on whatever screen is
+                    // open, not only Dashboard/Leads.
+                    if (screen == S_DASH || screen == S_LEADS || pendingBannerText != null) render();
                 }
                 @Override public void onError(String message) {
                     leadsLoading = false;
@@ -363,6 +527,10 @@ public class MainActivity extends Activity {
         localPageRecords = new java.util.ArrayList<UsersStore.User>();
         autoExpireCount = 0;
         currentOrder = null;
+        // v8.2: never carry one account's banners/badges into the next login.
+        pendingBannerText = null; pendingBannerLead = null; pendingBannerOrder = null;
+        pendingOpenLeadDoc = null; pendingOpenOrderId = null;
+        unreadLeadDocIds.clear(); unreadOrderIds.clear(); sendInFlightDocs.clear();
         selectedPackage = null;
         leadsStore.setLiveLeads(new ArrayList<LeadsStore.Lead>());
         backStack.clear();
@@ -564,6 +732,9 @@ public class MainActivity extends Activity {
             tile.setLayoutParams(new LinearLayout.LayoutParams(dp(34), dp(34)));
             tile.addView(iconView(iconRes(it[0]), selected ? Color.WHITE : V3_NAV_GREY));
             item.addView(tile);
+            LinearLayout labelRow = new LinearLayout(this);
+            labelRow.setOrientation(LinearLayout.HORIZONTAL);
+            labelRow.setGravity(Gravity.CENTER);
             TextView label = new TextView(this);
             label.setText(it[1]);
             label.setTextSize(11);
@@ -571,7 +742,13 @@ public class MainActivity extends Activity {
             label.setTextColor(selected ? V3_VIOLET : V3_NAV_GREY);
             label.setGravity(Gravity.CENTER);
             label.setPadding(0, dp(2), 0, 0);
-            item.addView(label);
+            labelRow.addView(label);
+            // v8.2: unread dot on Leads / Orders nav items.
+            if ((target == S_LEADS && !unreadLeadDocIds.isEmpty())
+                    || (target == S_ORDERS && !unreadOrderIds.isEmpty())) {
+                labelRow.addView(navDot());
+            }
+            item.addView(labelRow);
             item.setOnClickListener(new View.OnClickListener() {
                 @Override public void onClick(View v) { go(target, false); }
             });
@@ -608,6 +785,9 @@ public class MainActivity extends Activity {
             content.addView(noticeCard(notice));
             notice = null;
         }
+        // v8.2: in-app notification banner (tapping opens the item).
+        LinearLayout banner = notificationBannerView();
+        if (banner != null) content.addView(banner);
         switch (screen) {
             case S_LOGIN: showLogin(); break;
             case S_PENDING: showPending(); break;
@@ -1186,6 +1366,25 @@ public class MainActivity extends Activity {
         c.addView(google);
         content.addView(c);
 
+        // v8.2: notification opt-in. Plain language, never blocks login:
+        // the login button above works whether this is on or off.
+        if (Build.VERSION.SDK_INT >= 33
+                && checkSelfPermission(android.Manifest.permission.POST_NOTIFICATIONS)
+                    != PackageManager.PERMISSION_GRANTED) {
+            LinearLayout nc = card();
+            nc.addView(text("নতুন মেসেজ বা অর্ডার এলে ফোনে খবর পেতে নোটিফিকেশন চালু করুন।", 14, TEXT, false));
+            // v8.2 closed-app, plain language only: checked periodically,
+            // including while the app is closed — not instant.
+            nc.addView(text("অ্যাপ বন্ধ থাকলেও নতুন খবর কিছুক্ষণ পর পর যাচাই করে জানানো হয়।", 13, TEXT2, false));
+            nc.addView(outlineButton("নোটিফিকেশন চালু করুন", PRIMARY, new View.OnClickListener() {
+                @Override public void onClick(View v) {
+                    seenPrefs().edit().putBoolean("notif_asked", true).apply();
+                    requestPermissions(new String[]{android.Manifest.permission.POST_NOTIFICATIONS}, RC_NOTIFICATIONS);
+                }
+            }));
+            content.addView(nc);
+        }
+
         // v3 login feature row: chat / cart / clock, 3 columns in a glass card.
         LinearLayout feat = card();
         LinearLayout frow = new LinearLayout(this);
@@ -1395,6 +1594,8 @@ public class MainActivity extends Activity {
         LinearLayout.LayoutParams mp = new LinearLayout.LayoutParams(
             0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f);
         row.addView(mid, mp);
+        // v8.2: unread dot on a lead row with a new customer message.
+        if (unreadLeadDocIds.contains(lead.docId())) row.addView(navDot());
         row.addView(statusChip(lead));
         row.setBackground(rippleBackground());
         row.setClickable(true);
@@ -1513,6 +1714,9 @@ public class MainActivity extends Activity {
             threadPane.addView(noticeCard(notice));
             notice = null;
         }
+        // v8.2: banner also shows inside an open thread (for other threads/orders).
+        LinearLayout threadBanner = notificationBannerView();
+        if (threadBanner != null) threadPane.addView(threadBanner);
 
         // Fixed header: back + name + status. Never scrolls away.
         LinearLayout head = card();
@@ -1645,10 +1849,24 @@ public class MainActivity extends Activity {
                     TextView st = text("পাঠানো যায়নি — আবার চেষ্টা করুন", 12, RED, true);
                     st.setGravity(Gravity.END);
                     wrap.addView(st);
+                    // v8.2: resend ONLY here — a confirmed failure.
                     wrap.addView(ghostButton("↻ এই মেসেজ আবার পাঠান",
                         new View.OnClickListener() {
                             @Override public void onClick(View v) {
                                 resendThreadMessage(lead, m);
+                            }
+                        }));
+                } else if ("unknown".equals(m.sendStatus)) {
+                    // v8.2: outcome unknown (e.g. response lost after the
+                    // request was sent). NO resend button here — tapping
+                    // resend blindly is exactly how duplicates happened.
+                    TextView st = text("আগের মেসেজটি পাঠানো হয়েছে কিনা যাচাই হচ্ছে…", 12, AMBER, true);
+                    st.setGravity(Gravity.END);
+                    wrap.addView(st);
+                    wrap.addView(ghostButton("রিফ্রেশ করে দেখুন",
+                        new View.OnClickListener() {
+                            @Override public void onClick(View v) {
+                                checkUnknownMessage(lead, m);
                             }
                         }));
                 }
@@ -1694,8 +1912,16 @@ public class MainActivity extends Activity {
         LinearLayout.LayoutParams slp = new LinearLayout.LayoutParams(dp(46), dp(46));
         slp.setMargins(dp(8), 0, 0, 0);
         send.setLayoutParams(slp);
+        // v8.2: while a send for THIS thread is in flight, its send
+        // button is dimmed and disabled; other threads are unaffected.
+        if (sendInFlightDocs.contains(lead.docId())) {
+            send.setEnabled(false);
+            send.setAlpha(0.4f);
+        }
         send.setOnClickListener(new View.OnClickListener() {
             @Override public void onClick(View v) {
+                // v8.2: duplicate taps ignored (guarded again inside send).
+                if (sendInFlightDocs.contains(lead.docId())) return;
                 String msg = threadInput.getText().toString().trim();
                 if (msg.length() == 0) {
                     Toast.makeText(MainActivity.this, "প্রথমে রিপ্লাই লিখুন।", Toast.LENGTH_SHORT).show();
@@ -1725,78 +1951,177 @@ public class MainActivity extends Activity {
     // the message stays visible locally with an honest
     // "saving to chat history…" status instead of silently pretending
     // a locally-only message is saved.
+    // v8.2 SEND FLOW — confirmed mechanism (read in code, not guessed):
+    // the reply call used 30s timeouts while the reply service sleeps
+    // when idle and can take 50s+ to wake. On a timeout the old code
+    // ran onError -> sendStatus "failed" even though the service may
+    // already have sent the message via Messenger, and the resend
+    // button had NO guard — so a blind resend sent the same text a
+    // second time. The old code also never set "sent" on the saved
+    // path: it relied on the follow-up reload replacing the thread,
+    // so a slow/failed reload left the message stuck on "sending".
+    // v8.2 rules: (1) the SERVICE answer decides the status — on
+    // success the message is "sent" immediately, and a reload failure
+    // never flips it; (2) timeouts are 90s (see helper); (3) a send
+    // for a thread is guarded per-thread while in flight; (4) an
+    // UNKNOWN outcome (response lost after dispatch) shows a
+    // checking state with a refresh-first action and NO resend button;
+    // only a CONFIRMED failure (service answered failure, or the
+    // request never left) shows the resend button; (5) the service is
+    // the single history writer — after success the thread reloads
+    // from the service copy and the local copy is dropped, never
+    // appended a second time.
     private void sendThreadMessage(final LeadsStore.Lead lead, final String msg) {
+        // Per-thread in-flight guard: duplicate taps ignored.
+        if (sendInFlightDocs.contains(lead.docId())) return;
+        // While a previous send for this thread is unresolved, do not
+        // stack another send on top of it — resolve it first.
+        for (LeadsStore.Message old : lead.messages) {
+            if ("unknown".equals(old.sendStatus)) {
+                Toast.makeText(this, "আগের মেসেজটি পাঠানো হয়েছে কিনা যাচাই হচ্ছে…", Toast.LENGTH_SHORT).show();
+                return;
+            }
+        }
         final LeadsStore.Message m = leadsStore.addSendingOwnerMessage(lead, msg);
+        sendInFlightDocs.add(lead.docId());
         if (threadInput != null) threadInput.setText("");
         renderThreadScreen();
         if (FirebaseAuthHelper.currentUid() == null) {
+            sendInFlightDocs.remove(lead.docId());
             m.sendStatus = "failed";
             Toast.makeText(this, "লগইন করা নেই। আবার লগইন করুন।", Toast.LENGTH_SHORT).show();
             renderThreadScreen();
             return;
         }
         FirebaseAuthHelper.sendLiveReplyWithSave(this, FirebaseAuthHelper.currentUid(), lead, msg,
-            new FirebaseAuthHelper.ResultCallback<FirebaseAuthHelper.ReplyOutcome>() {
+            new FirebaseAuthHelper.ReplyCallback() {
                 @Override public void onSuccess(FirebaseAuthHelper.ReplyOutcome outcome) {
-                    if (!outcome.saved) {
-                        // Old service: Messenger got it, history did not.
-                        m.sendStatus = "sent_pending_save";
-                        FirebaseAuthHelper.updateLeadStatus(lead, true, "handover",
-                            new FirebaseAuthHelper.ResultCallback<Boolean>() {
-                                @Override public void onSuccess(Boolean o) { }
-                                @Override public void onError(String e) { }
-                            });
-                        notice = "Messenger-এ পাঠানো হয়েছে।";
-                        renderThreadScreen();
-                        return;
-                    }
-                    // Service saved it: pause, then reload the doc so the
-                    // thread on screen IS the service-saved thread.
-                    FirebaseAuthHelper.updateLeadStatus(lead, true, "handover",
-                        new FirebaseAuthHelper.ResultCallback<Boolean>() {
-                            @Override public void onSuccess(Boolean o) { reloadLeadIntoThread(lead); }
-                            @Override public void onError(String e) { reloadLeadIntoThread(lead); }
-                        });
+                    sendInFlightDocs.remove(lead.docId());
+                    handleReplySuccess(lead, m, outcome);
                 }
-                @Override public void onError(String message) {
-                    m.sendStatus = "failed";
-                    renderThreadScreen();
+                @Override public void onFailure(boolean unknown, String message) {
+                    sendInFlightDocs.remove(lead.docId());
+                    handleReplyFailure(lead, m, unknown);
                 }
             });
     }
 
     private void resendThreadMessage(final LeadsStore.Lead lead, final LeadsStore.Message m) {
+        // v8.2: resend exists ONLY for a confirmed failure. It refuses
+        // to run for "unknown", "sending" or "sent" — never after a
+        // timeout, where a blind resend would duplicate the message.
+        if (sendInFlightDocs.contains(lead.docId())) return;
+        if (!"failed".equals(m.sendStatus)) return;
+        sendInFlightDocs.add(lead.docId());
         m.sendStatus = "sending";
         renderThreadScreen();
         if (FirebaseAuthHelper.currentUid() == null) {
+            sendInFlightDocs.remove(lead.docId());
             m.sendStatus = "failed";
             renderThreadScreen();
             return;
         }
         FirebaseAuthHelper.sendLiveReplyWithSave(this, FirebaseAuthHelper.currentUid(), lead, m.text,
-            new FirebaseAuthHelper.ResultCallback<FirebaseAuthHelper.ReplyOutcome>() {
+            new FirebaseAuthHelper.ReplyCallback() {
                 @Override public void onSuccess(FirebaseAuthHelper.ReplyOutcome outcome) {
-                    if (!outcome.saved) {
-                        m.sendStatus = "sent_pending_save";
-                        renderThreadScreen();
-                        return;
+                    sendInFlightDocs.remove(lead.docId());
+                    handleReplySuccess(lead, m, outcome);
+                }
+                @Override public void onFailure(boolean unknown, String message) {
+                    sendInFlightDocs.remove(lead.docId());
+                    handleReplyFailure(lead, m, unknown);
+                }
+            });
+    }
+
+    /** Shared success path for send + resend. The service answer wins:
+     *  "sent" is set HERE, before any pause/reload step, so a slow or
+     *  failed reload can never flip a sent message back. */
+    private void handleReplySuccess(final LeadsStore.Lead lead, final LeadsStore.Message m,
+                                    FirebaseAuthHelper.ReplyOutcome outcome) {
+        m.sendStatus = "sent";
+        notice = "Messenger-এ পাঠানো হয়েছে।";
+        if (!outcome.saved) {
+            // Old service: Messenger got it, history did not. Keep the
+            // local copy visible with its honest pending-save status.
+            m.sendStatus = "sent_pending_save";
+            FirebaseAuthHelper.updateLeadStatus(lead, true, "handover",
+                new FirebaseAuthHelper.ResultCallback<Boolean>() {
+                    @Override public void onSuccess(Boolean o) { }
+                    @Override public void onError(String e) { }
+                });
+            renderThreadScreen();
+            return;
+        }
+        // Service saved it: pause, then reload so the thread on screen
+        // IS the service-saved thread (local copy dropped, not doubled).
+        FirebaseAuthHelper.updateLeadStatus(lead, true, "handover",
+            new FirebaseAuthHelper.ResultCallback<Boolean>() {
+                @Override public void onSuccess(Boolean o) { reloadLeadIntoThread(lead, m); }
+                @Override public void onError(String e) { reloadLeadIntoThread(lead, m); }
+            });
+    }
+
+    /** Shared failure path. Unknown is NOT failed: it gets the
+     *  checking state, and only a refresh-first check may resolve it. */
+    private void handleReplyFailure(final LeadsStore.Lead lead, final LeadsStore.Message m, boolean unknown) {
+        m.sendStatus = unknown ? "unknown" : "failed";
+        renderThreadScreen();
+    }
+
+    /** Reload ONE lead doc from the database and swap it into the list
+     *  and the open thread. This is what makes Refresh truthful.
+     *  v8.2: if the just-sent local message is already in the reloaded
+     *  thread, the service copy wins and the local copy is dropped
+     *  (never shown twice). If it is missing, the local "sent" copy
+     *  is kept and a plain refresh hint is shown. A reload FAILURE
+     *  leaves the "sent" status untouched — it never flips to failed. */
+    private void reloadLeadIntoThread(final LeadsStore.Lead lead, final LeadsStore.Message sentLocal) {
+        if (FirebaseAuthHelper.currentUid() == null) {
+            renderThreadScreen();
+            return;
+        }
+        FirebaseAuthHelper.fetchLead(lead.pageId, lead.psid,
+            new FirebaseAuthHelper.ResultCallback<LeadsStore.Lead>() {
+                @Override public void onSuccess(LeadsStore.Lead reloaded) {
+                    if (sentLocal != null && !containsOwnerText(reloaded, sentLocal.text)) {
+                        reloaded.messages.add(sentLocal);
+                        notice = "Messenger-এ পাঠানো হয়েছে — তালিকায় না দেখালে রিফ্রেশ করে দেখুন।";
                     }
-                    FirebaseAuthHelper.updateLeadStatus(lead, true, "handover",
-                        new FirebaseAuthHelper.ResultCallback<Boolean>() {
-                            @Override public void onSuccess(Boolean o) { reloadLeadIntoThread(lead); }
-                            @Override public void onError(String e) { reloadLeadIntoThread(lead); }
-                        });
+                    List<LeadsStore.Lead> all = leadsStore.all();
+                    for (int i = 0; i < all.size(); i++) {
+                        if (all.get(i).docId().equals(reloaded.docId())) {
+                            all.set(i, reloaded);
+                            break;
+                        }
+                    }
+                    currentLead = reloaded;
+                    renderThreadScreen();
                 }
                 @Override public void onError(String message) {
-                    m.sendStatus = "failed";
+                    // v8.2: reload failure is NOT a send failure. The
+                    // message keeps its "sent" status; plain hint only.
+                    if (notice == null) notice = "Messenger-এ পাঠানো হয়েছে।";
                     renderThreadScreen();
                 }
             });
     }
 
-    /** Reload ONE lead doc from the database and swap it into the list
-     *  and the open thread. This is what makes Refresh truthful. */
-    private void reloadLeadIntoThread(final LeadsStore.Lead lead) {
+    private boolean containsOwnerText(LeadsStore.Lead lead, String text) {
+        if (lead == null || text == null) return false;
+        for (LeadsStore.Message m : lead.messages) {
+            if ("owner".equals(m.role) && text.equals(m.text)) return true;
+        }
+        return false;
+    }
+
+    /** v8.2 UNKNOWN resolution — refresh FIRST, resend never blindly.
+     *  Reload the thread: if the service copy already has this text,
+     *  it did go (show sent). Only if the reload proves it absent is
+     *  the user allowed to send again — as a fresh send: the text is
+     *  put back in the composer for one explicit tap, not re-sent
+     *  silently behind the refresh. */
+    private void checkUnknownMessage(final LeadsStore.Lead lead, final LeadsStore.Message m) {
         if (FirebaseAuthHelper.currentUid() == null) {
             renderThreadScreen();
             return;
@@ -1812,12 +2137,18 @@ public class MainActivity extends Activity {
                         }
                     }
                     currentLead = reloaded;
-                    renderThreadScreen();
+                    if (containsOwnerText(reloaded, m.text)) {
+                        notice = "Messenger-এ পাঠানো হয়েছে।";
+                        renderThreadScreen();
+                    } else {
+                        notice = "মেসেজটি পাঠানো হয়নি — আবার পাঠান।";
+                        renderThreadScreen();
+                        if (threadInput != null) threadInput.setText(m.text);
+                    }
                 }
                 @Override public void onError(String message) {
                     Toast.makeText(MainActivity.this,
-                        "রিলোড হয়নি: " + message, Toast.LENGTH_LONG).show();
-                    renderThreadScreen();
+                        "রিফ্রেশ হয়নি — আবার চেষ্টা করুন।", Toast.LENGTH_SHORT).show();
                 }
             });
     }
@@ -1851,12 +2182,289 @@ public class MainActivity extends Activity {
                 }
                 @Override public void onError(String message) {
                     Toast.makeText(MainActivity.this,
-                        "রিফ্রেশ হয়নি: " + message, Toast.LENGTH_LONG).show();
+                        "রিফ্রেশ হয়নি — আবার চেষ্টা করুন।", Toast.LENGTH_SHORT).show();
                 }
             });
     }
 
     // ---- v6: ORDERS (in-app, same database 'orders' as app) ----
+
+    // ---- v8.2: IN-APP NOTIFICATIONS ----
+    // Honest limit (also in the README): this is NOT true closed-app
+    // push. Nothing arrives while the app is fully closed. A banner,
+    // nav/row badges and a phone notification appear when the app is
+    // open (or in the background) and refreshes. True closed-app push
+    // needs a cloud-messaging sender on the service and is the
+    // documented next step, not built here.
+    // Detection runs on every loadLiveLeads/loadLiveOrders refresh and
+    // compares against stored fingerprints, so each new item raises
+    // exactly one banner and one phone notification — never one per
+    // refresh. Two fingerprints per item are kept: "seen" (updated only
+    // when the thread/order is opened, so badges survive until read)
+    // and "notified" (updated on detection, so nothing re-fires).
+    private android.content.SharedPreferences seenPrefs() {
+        return getSharedPreferences("automateiq_seen_v82", Context.MODE_PRIVATE);
+    }
+
+    private String leadFingerprint(LeadsStore.Lead l) {
+        // Customer messages ONLY: owner/bot replies and timestamps
+        // must not trip a "new customer message" badge.
+        String lastUser = "";
+        int userCount = 0;
+        for (LeadsStore.Message m : l.messages) {
+            if ("user".equals(m.role)) { lastUser = m.text == null ? "" : m.text; userCount++; }
+        }
+        return userCount + "|" + lastUser;
+    }
+
+    private String shortPreview(String text) {
+        if (text == null) return "";
+        String t = text.trim();
+        if (t.length() > 40) return t.substring(0, 40) + "…";
+        return t;
+    }
+
+    private String lastCustomerText(LeadsStore.Lead l) {
+        String last = "";
+        for (LeadsStore.Message m : l.messages) {
+            if ("user".equals(m.role) && m.text != null) last = m.text;
+        }
+        return last;
+    }
+
+    private void markLeadRead(LeadsStore.Lead lead) {
+        String uid = FirebaseAuthHelper.currentUid();
+        if (uid == null || lead == null) return;
+        // Use the freshest copy in the store when available.
+        LeadsStore.Lead fresh = lead;
+        for (LeadsStore.Lead l : leadsStore.all()) {
+            if (l.docId().equals(lead.docId())) { fresh = l; break; }
+        }
+        seenPrefs().edit()
+            .putString("lead_seen_" + uid + "_" + lead.docId(), leadFingerprint(fresh))
+            .apply();
+        unreadLeadDocIds.remove(lead.docId());
+    }
+
+    private void markOrderRead(OrderStore.Order o) {
+        String uid = FirebaseAuthHelper.currentUid();
+        if (uid == null || o == null) return;
+        java.util.Set<String> seen = prefIdSet("order_seen_" + uid);
+        seen.add(o.id);
+        prefPutIdSet("order_seen_" + uid, seen);
+        unreadOrderIds.remove(o.id);
+    }
+
+    private java.util.Set<String> prefIdSet(String key) {
+        java.util.Set<String> out = new java.util.HashSet<String>();
+        String raw = seenPrefs().getString(key, "");
+        if (raw == null || raw.length() == 0) return out;
+        for (String part : raw.split(",")) {
+            if (part.length() > 0) out.add(part);
+        }
+        return out;
+    }
+
+    private void prefPutIdSet(String key, java.util.Set<String> ids) {
+        StringBuilder sb = new StringBuilder();
+        for (String id : ids) {
+            if (sb.length() > 0) sb.append(",");
+            sb.append(id);
+        }
+        seenPrefs().edit().putString(key, sb.toString()).apply();
+    }
+
+    private void detectNewLeads(java.util.List<LeadsStore.Lead> live) {
+        String uid = FirebaseAuthHelper.currentUid();
+        if (uid == null || live == null) return;
+        android.content.SharedPreferences prefs = seenPrefs();
+        if (!prefs.getBoolean("leads_seeded_" + uid, false)) {
+            // First load seeds silently: existing messages are not
+            // "new", so no badge storm on first login.
+            android.content.SharedPreferences.Editor ed = prefs.edit();
+            for (LeadsStore.Lead l : live) {
+                String fp = leadFingerprint(l);
+                ed.putString("lead_seen_" + uid + "_" + l.docId(), fp);
+                ed.putString("lead_notified_" + uid + "_" + l.docId(), fp);
+            }
+            ed.putBoolean("leads_seeded_" + uid, true);
+            ed.apply();
+            return;
+        }
+        android.content.SharedPreferences.Editor ed = prefs.edit();
+        boolean changed = false;
+        LeadsStore.Lead bannerLead = null;
+        String bannerPreview = null;
+        for (LeadsStore.Lead l : live) {
+            String fp = leadFingerprint(l);
+            String notified = prefs.getString("lead_notified_" + uid + "_" + l.docId(), null);
+            if (notified == null || !notified.equals(fp)) {
+                // Genuinely new customer message (or a brand-new lead).
+                ed.putString("lead_notified_" + uid + "_" + l.docId(), fp);
+                changed = true;
+                unreadLeadDocIds.add(l.docId());
+                if (bannerLead == null) { bannerLead = l; bannerPreview = lastCustomerText(l); }
+                postLocalNotification("নতুন মেসেজ: " + l.name,
+                    shortPreview(lastCustomerText(l)), "lead_" + l.docId());
+            }
+            String seen = prefs.getString("lead_seen_" + uid + "_" + l.docId(), null);
+            if (seen == null || !seen.equals(fp)) unreadLeadDocIds.add(l.docId());
+            else unreadLeadDocIds.remove(l.docId());
+        }
+        if (changed) ed.apply();
+        // Prune badges for leads that no longer exist.
+        java.util.Set<String> liveIds = new java.util.HashSet<String>();
+        for (LeadsStore.Lead l : live) liveIds.add(l.docId());
+        unreadLeadDocIds.retainAll(liveIds);
+        if (bannerLead != null) {
+            pendingBannerLead = bannerLead;
+            pendingBannerOrder = null;
+            pendingBannerText = "নতুন মেসেজ: " + bannerLead.name + " — " + shortPreview(bannerPreview);
+        }
+    }
+
+    private void detectNewOrders(java.util.List<OrderStore.Order> live) {
+        // v8.2: order notifications are admin-only by design.
+        if (!FirebaseAuthHelper.isAdmin()) return;
+        String uid = FirebaseAuthHelper.currentUid();
+        if (uid == null || live == null) return;
+        android.content.SharedPreferences prefs = seenPrefs();
+        java.util.Set<String> seen = prefIdSet("order_seen_" + uid);
+        java.util.Set<String> notified = prefIdSet("order_notified_" + uid);
+        if (!prefs.getBoolean("orders_seeded_" + uid, false)) {
+            // First load seeds silently: existing orders are not new.
+            for (OrderStore.Order o : live) { seen.add(o.id); notified.add(o.id); }
+            prefPutIdSet("order_seen_" + uid, seen);
+            prefPutIdSet("order_notified_" + uid, notified);
+            prefs.edit().putBoolean("orders_seeded_" + uid, true).apply();
+            return;
+        }
+        OrderStore.Order bannerOrder = null;
+        boolean changed = false;
+        // live orders arrive newest-first, so the first new pending
+        // order is the banner; every new one still gets its own phone
+        // notification below (one per item, never per refresh).
+        for (OrderStore.Order o : live) {
+            if (!"pending".equals(o.status)) {
+                if (seen.contains(o.id)) unreadOrderIds.remove(o.id);
+                continue;
+            }
+            if (!notified.contains(o.id)) {
+                notified.add(o.id);
+                changed = true;
+                unreadOrderIds.add(o.id);
+                if (bannerOrder == null) bannerOrder = o;
+                String amount = o.amount == null ? "" : o.amount;
+                if (amount.length() > 0 && !amount.startsWith("৳")) amount = "৳" + amount;
+                postLocalNotification("নতুন অর্ডার: " + o.serviceName,
+                    amount.length() > 0 ? amount : "নতুন অর্ডার এসেছে", "order_" + o.id);
+            }
+            if (!seen.contains(o.id)) unreadOrderIds.add(o.id);
+            else unreadOrderIds.remove(o.id);
+        }
+        if (changed) prefPutIdSet("order_notified_" + uid, notified);
+        java.util.Set<String> liveOrderIds = new java.util.HashSet<String>();
+        for (OrderStore.Order o : live) liveOrderIds.add(o.id);
+        unreadOrderIds.retainAll(liveOrderIds);
+        if (bannerOrder != null) {
+            String amount = bannerOrder.amount == null ? "" : bannerOrder.amount;
+            if (amount.length() > 0 && !amount.startsWith("৳")) amount = "৳" + amount;
+            pendingBannerOrder = bannerOrder;
+            pendingBannerLead = null;
+            pendingBannerText = "নতুন অর্ডার: " + bannerOrder.serviceName
+                + (amount.length() > 0 ? " — " + amount : "");
+        }
+    }
+
+    private View navDot() {
+        TextView d = new TextView(this);
+        GradientDrawable bg = new GradientDrawable();
+        bg.setShape(GradientDrawable.OVAL);
+        bg.setColor(RED);
+        d.setBackground(bg);
+        LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(dp(8), dp(8));
+        lp.setMargins(dp(4), 0, 0, 0);
+        d.setLayoutParams(lp);
+        return d;
+    }
+
+    /** One tappable banner for the latest new item. Tapping opens its
+     *  thread/order (which also marks it read and clears the banner). */
+    private LinearLayout notificationBannerView() {
+        if (pendingBannerText == null) return null;
+        final LeadsStore.Lead bLead = pendingBannerLead;
+        final OrderStore.Order bOrder = pendingBannerOrder;
+        LinearLayout b = card();
+        b.setBackground(rounded(SOFT_BLUE, 16));
+        b.addView(text(pendingBannerText, 14, TEXT, true));
+        b.addView(text("খুলতে এখানে চাপুন", 12, TEXT2, false));
+        b.setClickable(true);
+        b.setOnClickListener(new View.OnClickListener() {
+            @Override public void onClick(View v) {
+                if (bLead != null) {
+                    LeadsStore.Lead fresh = bLead;
+                    for (LeadsStore.Lead l : leadsStore.all()) {
+                        if (l.docId().equals(bLead.docId())) { fresh = l; break; }
+                    }
+                    currentLead = fresh;
+                    pendingBannerText = null; pendingBannerLead = null;
+                    go(S_LEAD_DETAIL, true);
+                } else if (bOrder != null) {
+                    OrderStore.Order fresh = bOrder;
+                    for (OrderStore.Order o : orders) {
+                        if (o.id.equals(bOrder.id)) { fresh = o; break; }
+                    }
+                    currentOrder = fresh;
+                    pendingBannerText = null; pendingBannerOrder = null;
+                    go(S_ORDER_DETAIL, true);
+                }
+            }
+        });
+        return b;
+    }
+
+    /** Standard phone notification (system sound/vibration only). If
+     *  permission is missing or the manager is unavailable, this
+     *  silently does nothing — the in-app banner and badges still work. */
+    private void postLocalNotification(String title, String body, String tag) {
+        try {
+            if (Build.VERSION.SDK_INT >= 33
+                    && checkSelfPermission(android.Manifest.permission.POST_NOTIFICATIONS)
+                        != PackageManager.PERMISSION_GRANTED) return;
+            NotificationManager nm = (NotificationManager) getSystemService(Context.NOTIFICATION_SERVICE);
+            if (nm == null) return;
+            if (Build.VERSION.SDK_INT >= 26) {
+                NotificationChannel ch = new NotificationChannel(NOTIF_CHANNEL_ID,
+                    "নতুন খবর", NotificationManager.IMPORTANCE_DEFAULT);
+                ch.setDescription("নতুন মেসেজ আর অর্ডারের খবর");
+                nm.createNotificationChannel(ch);
+            }
+            Intent intent = new Intent(this, MainActivity.class);
+            intent.setFlags(Intent.FLAG_ACTIVITY_NEW_TASK | Intent.FLAG_ACTIVITY_CLEAR_TASK);
+            PendingIntent pi = PendingIntent.getActivity(this, 0, intent,
+                PendingIntent.FLAG_UPDATE_CURRENT | PendingIntent.FLAG_IMMUTABLE);
+            Notification.Builder b;
+            if (Build.VERSION.SDK_INT >= 26) b = new Notification.Builder(this, NOTIF_CHANNEL_ID);
+            else b = new Notification.Builder(this);
+            int icon = iconRes("ic_bell");
+            if (icon == 0) icon = android.R.drawable.ic_dialog_info;
+            b.setContentTitle(title).setContentText(body).setSmallIcon(icon)
+                .setContentIntent(pi).setAutoCancel(true)
+                .setDefaults(Notification.DEFAULT_ALL);
+            nm.notify(tag, (Math.abs(tag.hashCode()) % 100000) + 1000, b.build());
+        } catch (Exception ignored) { }
+    }
+
+    /** Ask once after sign-in / first use. Never blocks login: a
+     *  denial only means phone notifications stay off. */
+    private void maybeRequestNotificationPermission() {
+        if (Build.VERSION.SDK_INT < 33) return;
+        if (checkSelfPermission(android.Manifest.permission.POST_NOTIFICATIONS)
+                == PackageManager.PERMISSION_GRANTED) return;
+        if (seenPrefs().getBoolean("notif_asked", false)) return;
+        seenPrefs().edit().putBoolean("notif_asked", true).apply();
+        requestPermissions(new String[]{android.Manifest.permission.POST_NOTIFICATIONS}, RC_NOTIFICATIONS);
+    }
 
     private OrderStore.OrderPackage findMonthlyPackage(String service, String pkgLabel) {
         for (OrderStore.OrderPackage p : OrderStore.PACKAGES) {
@@ -1903,7 +2511,9 @@ public class MainActivity extends Activity {
         FirebaseAuthHelper.fetchOrders(uid, admin,
             new FirebaseAuthHelper.ResultCallback<List<OrderStore.Order>>() {
                 @Override public void onSuccess(List<OrderStore.Order> live) {
+                    detectNewOrders(live);
                     orders = live;
+                    openPendingOrderIfAny();
                     ordersLoaded = true;
                     ordersLoading = false;
                     ordersError = null;
@@ -1911,7 +2521,8 @@ public class MainActivity extends Activity {
                     // v7 AUTO-EXPIRE (admin only, once per load): monthly
                     // orders past expiry are auto-cancelled in database.
                     if (FirebaseAuthHelper.isAdmin()) runAutoExpire();
-                    if (screen == S_DASH || screen == S_ORDERS || screen == S_MY_SUB) render();
+                    if (pendingBannerText != null) render();
+                    else if (screen == S_DASH || screen == S_ORDERS || screen == S_MY_SUB) render();
                 }
                 @Override public void onError(String message) {
                     ordersLoading = false;
@@ -2042,6 +2653,8 @@ public class MainActivity extends Activity {
             LinearLayout.LayoutParams mp = new LinearLayout.LayoutParams(
                 0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f);
             top.addView(nm, mp);
+            // v8.2: unread dot on a newly arrived pending order row.
+            if (unreadOrderIds.contains(o.id)) top.addView(navDot());
             top.addView(orderStatusChip(o));
             row.addView(top);
             row.addView(text(o.packageDetails + "  •  " + o.amount, 14, TEXT, false));
@@ -3114,10 +3727,22 @@ public class MainActivity extends Activity {
 
         LinearLayout steps = card();
         steps.addView(text("কাস্টমারের পেজ যেভাবে কানেক্ট হবে", 16, TEXT, true));
+        // v8.2: plain-language steps. No IDs are asked for here: only
+        // the admin profile link, Page Admin access, and waiting.
+        steps.addView(outlineButton("অ্যাডমিনের প্রোফাইল লিংক", PRIMARY, new View.OnClickListener() {
+            @Override public void onClick(View v) {
+                if (ADMIN_PROFILE_LINK == null || ADMIN_PROFILE_LINK.length() == 0) {
+                    // Link not supplied yet: say so plainly, open nothing.
+                    Toast.makeText(MainActivity.this, "লিংকটি অ্যাডমিন জানিয়ে দেবে।", Toast.LENGTH_SHORT).show();
+                } else {
+                    openUrl(ADMIN_PROFILE_LINK);
+                }
+            }
+        }));
         String[][] st = {
-            {"১", "AutoMateIQ অ্যাডমিনকে আপনার পেজে যোগ করুন", "কাস্টমার তার ফেসবুক পেজের সেটিংস থেকে AutoMateIQ-এর অ্যাডমিনকে Page Admin হিসেবে যোগ করবেন, অথবা নিজে একটি Meta App তৈরি করতে পারেন।"},
-            {"২", "Test হিসেবে যোগ করুন", "অ্যাক্সেস পেলে নিচের ফর্মে পেজের ডিটেইলস রেকর্ড করুন — প্রথমে Test।"},
-            {"৩", "Connected হলে বট চালু", "যাচাই শেষে Connected হবে। কানেকশন + চালু সাবস্ক্রিপশন থাকলেই বট চালু হবে।"},
+            {"১", "অ্যাডমিনের প্রোফাইল লিংকে চাপুন, এই ব্যক্তিকে আপনার পেজের অ্যাডমিন করুন", "উপরের বোতামে চাপুন — এই লিংকের প্রোফাইলের ব্যক্তিকেই আপনার পেজের অ্যাডমিন করতে হবে। তারপর ফেসবুকে আপনার পেজ খুলে পেজ সেটিংস → পেজ অ্যাক্সেস / পেজ রোলস থেকে সেই ব্যক্তিকে Admin হিসেবে যোগ করুন।"},
+            {"২", "অ্যাক্সেস দেওয়ার পর ৫–১০ মিনিট অপেক্ষা করুন", "আপনি অ্যাক্সেস দিলে আপনার পেজ কানেক্ট হতে ৫–১০ মিনিট লাগতে পারে।"},
+            {"৩", "কানেক্ট হলে স্বয়ংক্রিয়ভাবে চালু হবে", "একবার কানেক্ট হলে আর কিছু করতে হবে না — বট স্বয়ংক্রিয়ভাবে কাজ শুরু করবে।"},
         };
         for (String[] row : st) {
             LinearLayout r = new LinearLayout(this);
@@ -3192,29 +3817,30 @@ public class MainActivity extends Activity {
             @Override public void onClick(View v) { go(S_PAGES, false); }
         }));
         content.addView(text("কাস্টমার পেজ রেকর্ড", 26, NAVY, true));
+        // v8.2: plain guidance, no developer wording. The customer's app
+        // account is automatic — nobody is asked to find or type an ID.
         LinearLayout note = card();
         note.setBackground(rounded(AMBER_SOFT, 20));
-        note.addView(text("পেজ ডিটেইলস কাস্টমারের রেকর্ডে সংরক্ষণ করা হয় (pageName / pageLink / pageId / pageStatus / pageNotes)।", 13, TEXT, false));
+        note.addView(text("আপনার অ্যাকাউন্ট স্বয়ংক্রিয়ভাবে যুক্ত থাকবে — কোনো আইডি লিখতে হবে না।", 13, TEXT, true));
+        note.addView(text("শুধু পেজের নাম আর পেজ লিংক লিখুন। লিংক পাবেন ফেসবুকে আপনার পেজ খুলে, উপরের ঠিকানা থেকে কপি করে।", 13, TEXT, false));
+        note.addView(text("Page ID না জানলে খালি রাখুন — কানেক্ট হওয়ার পর অ্যাডমিন বসিয়ে দেবে।", 13, TEXT, false));
         content.addView(note);
 
-        final EditText userIdInput = new EditText(this);
-        userIdInput.setHint("কাস্টমারের userId * (কাস্টমার তালিকা থেকে কপি করুন)");
-        userIdInput.setTextSize(15);
-        if (pre != null) userIdInput.setText(pre.id);
-        final EditText nameInput = new EditText(this);
-        nameInput.setHint("কাস্টমারের নাম");
-        nameInput.setTextSize(15);
-        if (pre != null) nameInput.setText(pre.name);
+        // v8.2: NO typed Customer ID field and NO typed customer-name
+        // field. When editing from a customer detail screen, the
+        // customer is already known internally (pre); when no customer
+        // is picked yet, the save button is replaced by a button back
+        // to the customer list (see below).
         final EditText pageNameInput = new EditText(this);
         pageNameInput.setHint("পেজের নাম *");
         pageNameInput.setTextSize(15);
         if (pre != null) pageNameInput.setText(pre.pageName);
         final EditText pageLinkInput = new EditText(this);
-        pageLinkInput.setHint("পেজ লিংক (যেমন facebook.com/...)");
+        pageLinkInput.setHint("পেজ লিংক (ফেসবুকে পেজ খুলে উপরের ঠিকানা থেকে কপি করুন)");
         pageLinkInput.setTextSize(15);
         if (pre != null) pageLinkInput.setText(pre.pageLink);
         final EditText pageIdInput = new EditText(this);
-        pageIdInput.setHint("Page ID");
+        pageIdInput.setHint("Page ID (ঐচ্ছিক) — না জানলে খালি রাখুন");
         pageIdInput.setTextSize(15);
         if (pre != null) pageIdInput.setText(pre.pageId);
         final EditText notesInput = new EditText(this);
@@ -3226,7 +3852,8 @@ public class MainActivity extends Activity {
 
         LinearLayout form = card();
         form.addView(text("পেজের তথ্য", 16, TEXT, true));
-        for (EditText e : new EditText[]{userIdInput, nameInput, pageNameInput, pageLinkInput, pageIdInput, notesInput}) {
+        if (pre != null) form.addView(text("কাস্টমার: " + pre.name, 14, TEXT2, false));
+        for (EditText e : new EditText[]{pageNameInput, pageLinkInput, pageIdInput, notesInput}) {
             e.setBackground(roundedBorder(SOFT, 12));
             e.setPadding(dp(12), dp(10), dp(12), dp(10));
             form.addView(e);
@@ -3264,40 +3891,36 @@ public class MainActivity extends Activity {
             form.addView(rrow);
         }
         content.addView(form);
+        // v8.2: with no customer picked yet there is nothing to save
+        // to — and nobody is asked to type an ID to create one. Pick
+        // the customer from the list first, then edit their record.
+        if (pre == null) {
+            content.addView(outlineButton("কাস্টমার তালিকা খুলুন", PRIMARY, new View.OnClickListener() {
+                @Override public void onClick(View v) { go(S_CUSTOMERS, true); }
+            }));
+            return;
+        }
         content.addView(primaryButton("পেজ রেকর্ড সংরক্ষণ করুন", new View.OnClickListener() {
             @Override public void onClick(View v) {
-                final String userId = userIdInput.getText().toString().trim();
-                final String custName = nameInput.getText().toString().trim();
                 final String pgName = pageNameInput.getText().toString().trim();
                 final String pgLink = pageLinkInput.getText().toString().trim();
                 final String pgId = pageIdInput.getText().toString().trim();
                 final String pgNotes = notesInput.getText().toString().trim();
-                if (userId.length() == 0) {
-                    Toast.makeText(MainActivity.this, "কাস্টমারের userId লিখুন।", Toast.LENGTH_SHORT).show();
+                if (pgName.length() == 0) {
+                    Toast.makeText(MainActivity.this, "পেজের নাম লিখুন।", Toast.LENGTH_SHORT).show();
                     return;
                 }
-                UsersStore.User found = null;
-                for (UsersStore.User u : users) {
-                    if (userId.equals(u.id)) { found = u; break; }
-                }
-                final UsersStore.User target = found;
+                // v8.2: the customer is the already-picked record (pre);
+                // its id is used internally and never typed or shown as
+                // an input. Page ID stays optional (pgId may be empty).
+                final UsersStore.User target = pre;
                 final java.util.Map<String, Object> fields = new java.util.HashMap<String, Object>();
                 fields.put("pageName", pgName);
                 fields.put("pageLink", pgLink);
                 fields.put("pageId", pgId);
                 fields.put("pageStatus", sel[0]);
                 fields.put("pageNotes", pgNotes);
-                if (target == null) {
-                    UsersStore.User rec = new UsersStore.User(userId,
-                        custName.length() > 0 ? custName : "কাস্টমার", "user", "",
-                        pgName, pgLink, pgId, sel[0], pgNotes);
-                    rec.localOnly = true;
-                    localPageRecords.add(rec);
-                    notice = "এই userId ব্যবহারকারীর তালিকায় পাওয়া যায়নি — রেকর্ডটি সংরক্ষণ করা যায়নি। সঠিক userId দিয়ে আবার চেষ্টা করুন।";
-                    go(S_PAGES, false);
-                    return;
-                }
-                FirebaseAuthHelper.updateUserPageFields(userId, fields,
+                FirebaseAuthHelper.updateUserPageFields(target.id, fields,
                     new FirebaseAuthHelper.ResultCallback<Boolean>() {
                         @Override public void onSuccess(Boolean ok) {
                             target.pageName = pgName;

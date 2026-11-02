@@ -295,8 +295,8 @@ public class FirebaseAuthHelper {
                     HttpURLConnection conn = (HttpURLConnection) url.openConnection();
                     conn.setRequestMethod("POST");
                     conn.setRequestProperty("Content-Type", "application/json");
-                    conn.setConnectTimeout(30000);
-                    conn.setReadTimeout(30000);
+                    conn.setConnectTimeout(90000);
+                    conn.setReadTimeout(90000);
                     conn.setDoOutput(true);
                     String body = "{\"businessId\":\"" + jsonEscape(businessId)
                         + "\",\"pageId\":\"" + jsonEscape(lead.pageId)
@@ -604,25 +604,38 @@ public class FirebaseAuthHelper {
         }
     }
 
+    /** v8.2: reply result callback that separates a CONFIRMED failure
+     *  (the service answered non-2xx, or the request never left the
+     *  device) from an UNKNOWN outcome (the request was already
+     *  dispatched when the response was lost, e.g. a read timeout
+     *  after a slow wake-up — the service may already have sent the
+     *  message). Callers must NEVER blindly resend an unknown outcome. */
+    public interface ReplyCallback {
+        void onSuccess(ReplyOutcome outcome);
+        void onFailure(boolean unknown, String message);
+    }
+
     /** Same Render contract as sendLiveReply, but also reads the
      *  response body for the service's saved flag. */
     public static void sendLiveReplyWithSave(final Activity activity,
                                              final String businessId,
                                              final LeadsStore.Lead lead,
                                              final String message,
-                                             final ResultCallback<ReplyOutcome> cb) {
+                                             final ReplyCallback cb) {
         new Thread(new Runnable() {
             @Override public void run() {
                 boolean ok = false;
                 boolean saved = false;
+                boolean unknown = false;
+                boolean dispatched = false;
                 String err = "";
                 try {
                     URL url = new URL(LiveDataClient.RENDER_REPLY_URL);
                     HttpURLConnection conn = (HttpURLConnection) url.openConnection();
                     conn.setRequestMethod("POST");
                     conn.setRequestProperty("Content-Type", "application/json");
-                    conn.setConnectTimeout(30000);
-                    conn.setReadTimeout(30000);
+                    conn.setConnectTimeout(90000);
+                    conn.setReadTimeout(90000);
                     conn.setDoOutput(true);
                     String body = "{\"businessId\":\"" + jsonEscape(businessId)
                         + "\",\"pageId\":\"" + jsonEscape(lead.pageId)
@@ -632,6 +645,7 @@ public class FirebaseAuthHelper {
                     os.write(body.getBytes("UTF-8"));
                     os.flush();
                     os.close();
+                    dispatched = true;
                     int code = conn.getResponseCode();
                     ok = code >= 200 && code < 300;
                     if (!ok) err = "উত্তর আসেনি (কোড " + code + ")";
@@ -653,15 +667,20 @@ public class FirebaseAuthHelper {
                     saved = ok && !resp.contains("\"saved\":false");
                     conn.disconnect();
                 } catch (Exception e) {
+                    // If the request already left the device, the
+                    // service may have sent the message even though no
+                    // response came back: outcome UNKNOWN, not failed.
+                    unknown = dispatched;
                     err = "রিপ্লাই পাঠানো যায়নি: " + e.getMessage();
                 }
                 final boolean result = ok;
                 final boolean savedResult = saved;
+                final boolean unknownResult = unknown;
                 final String error = err;
                 activity.runOnUiThread(new Runnable() {
                     @Override public void run() {
                         if (result) cb.onSuccess(new ReplyOutcome(true, savedResult));
-                        else cb.onError(error);
+                        else cb.onFailure(unknownResult, error);
                     }
                 });
             }

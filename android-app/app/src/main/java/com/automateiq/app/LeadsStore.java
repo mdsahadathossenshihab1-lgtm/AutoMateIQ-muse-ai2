@@ -24,6 +24,9 @@ public class LeadsStore {
         public String text;
         public String createdAt;
         // v5 SEND STATUS: "" = historic/unknown, "sending" | "sent" | "failed".
+        // v8.2 adds "sent_pending_save" (service sent it, history did
+        // not save it) and "unknown" (response lost after dispatch —
+        // refresh-first, never blindly resent).
         // Only owner messages ever carry a status; customer/bot messages
         // keep "" and show no status line.
         public String sendStatus;
