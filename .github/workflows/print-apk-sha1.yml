@@ -22,5 +22,8 @@ jobs:
         run: |
           gh run download 41366727536 -n automateiq-app-debug -D apk
           ls -l apk
-      - name: Print APK certificate fingerprints
-        run: keytool -printcert -jarfile apk/app-debug.apk
+      - name: Print APK certificate fingerprints with apksigner
+        run: |
+          APKSIGNER=$(find "$ANDROID_SDK_ROOT/build-tools" -name apksigner -type f | head -n 1)
+          echo "apksigner: $APKSIGNER"
+          "$APKSIGNER" verify --print-certs apk/app-debug.apk
