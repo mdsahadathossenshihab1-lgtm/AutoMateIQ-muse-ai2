@@ -1,0 +1,30 @@
+name: Publish APK (temporary)
+
+on:
+  workflow_dispatch:
+
+permissions:
+  actions: read
+  contents: write
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Download built APK artifact from run 41366727536
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh run download 41366727536 -n automateiq-app-debug -D apk
+          ls -l apk
+      - name: Publish APK to public/app
+        run: |
+          mkdir -p public/app
+          cp apk/app-debug.apk public/app/automateiq-app.apk
+          ls -l public/app/automateiq-app.apk
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add public/app/automateiq-app.apk
+          git commit -m "Publish AutoMateIQ v8.1 APK (build run 41366727536)" || echo "nothing to commit"
+          git push
