@@ -11,8 +11,8 @@ android {
         applicationId "com.automateiq.app"
         minSdk 24
         targetSdk 34
-        versionCode 13
-        versionName "8.1"
+        versionCode 14
+        versionName "8.2"
     }
 
     buildTypes {
@@ -51,4 +51,11 @@ dependencies {
     implementation 'com.google.firebase:firebase-auth:23.0.0'
     implementation 'com.google.firebase:firebase-firestore:25.1.0'
     implementation 'com.google.android.gms:play-services-auth:21.0.0'
+    // v8.2 closed-app: FCM receiver (ready, sender NOT wired yet) +
+    // WorkManager periodic check (the actual closed-app delivery).
+    // Versions pinned to releases that exist on Google Maven and fit
+    // the auth 23 / firestore 25 era (no BoM switch, to avoid
+    // re-resolving the already-verified v8.1 set).
+    implementation 'com.google.firebase:firebase-messaging:24.0.2'
+    implementation 'androidx.work:work-runtime:2.9.0'
 }
