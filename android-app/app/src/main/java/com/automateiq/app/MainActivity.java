@@ -33,7 +33,7 @@ import java.util.ArrayList;
 import java.util.List;
 
 /**
- * AutoMateIQ Mobile Dashboard v8.0 — built exactly to approved design v3
+ * AutoMateIQ Mobile Dashboard v8.1 — SAME-TO-SAME to approved design v3 (2026-11-02): every colour, gradient, radius, padding, structure and animation below is taken from design-prototype-v3.html, not an approximation of it. Backend kept from v8/v7.
  * (2026-11-02): aurora/glass skin, vector icons, v3 typography scale and
  * subtle entry/press/progress animations, with plain user language in
  * every visible string. Backend kept from v7: role gating (admin panel
@@ -51,18 +51,43 @@ public class MainActivity extends Activity {
     private static final int NAVY = 0xFF172554;
     private static final int VIOLET = 0xFF8B5CF6;
     private static final int CYAN = 0xFF06B6D2;
-    private static final int BG = 0xFFF1F5F9;
+    // ---- v3 EXACT colours (design-prototype-v3.html, read 2026-11-02) ----
+    private static final int V3_VIOLET_DARK = 0xFF6D28D9; // appbar/hero start
+    private static final int V3_VIOLET = 0xFF7C3AED;      // label, nav-selected, btn start
+    private static final int V3_BLUE = 0xFF2563EB;        // appbar/hero mid (= PRIMARY)
+    private static final int V3_CYAN_DARK = 0xFF0891B2;   // appbar end
+    private static final int V3_CYAN = 0xFF06B6D2;        // hero end, btn end
+    private static final int V3_PINK = 0xFFEC4899;        // heroTop end, send start
+    private static final int V3_BODY_BG = 0xFFF0F4FF;     // phone body
+    private static final int V3_GLASS = 0xC7FFFFFF;       // rgba(255,255,255,.78)
+    private static final int V3_GLASS_BORDER = 0xD9FFFFFF; // rgba(255,255,255,.85)
+    private static final int V3_NAV_GREY = 0xFF94A3B8;
+    private static final int V3_INDIGO_TEXT = 0xFF4F46E5; // btn2 text
+    private static final int V3_INPUT_BORDER = 0x66A78BFA; // rgba(167,139,250,.4)
+    private static final int V3_TIMELINE_LINE = 0x73A78BFA; // rgba(167,139,250,.45)
+    private static final int V3_GREY_FG = 0xFF475569;
+    private static final int V3_BOT_BG = 0xFFE0F2FE;
+    private static final int V3_BOT_BORDER = 0xFFBAE6FD;
+    private static final int V3_DANGER_BG = 0xFFFFF1F2;
+    private static final int V3_DANGER_BORDER = 0xFFFECDD3;
+    private static final int V3_DANGER_FG = 0xFFBE123C;
+    private static final int V3_LOGIN_TOP = 0xFF4C1D95;
+    private static final int BG = 0xFFF0F4FF;
     private static final int SURFACE = 0xFFFFFFFF;
     private static final int TEXT = 0xFF0F172A;
     private static final int TEXT2 = 0xFF64748B;
     private static final int BORDER = 0xFFE2E8F0;
     private static final int SOFT = 0xFFEFF6FF;
     private static final int SOFT_BLUE = 0xFFDBEAFE;
-    private static final int GREEN = 0xFF16A34A;
+    private static final int GREEN = 0xFF15803D; // v3 chip fg
     private static final int GREEN_SOFT = 0xFFDCFCE7;
-    private static final int AMBER = 0xFFD97706;
+    private static final int AMBER = 0xFFB45309; // v3 chip fg
     private static final int AMBER_SOFT = 0xFFFEF3C7;
-    private static final int RED = 0xFFDC2626;
+    private static final int RED = 0xFFB91C1C; // v3 chip fg
+    private static final int TL_GREEN = 0xFF059669; // v3 timeline dot
+    private static final int TL_AMBER = 0xFFD97706; // (kept) / v3 dot amber below
+    private static final int TL_AMBER_DOT = 0xFFF59E0B; // v3 timeline dot
+    private static final int TL_ROSE = 0xFFF43F5E; // v3 timeline dot
     private static final int RED_SOFT = 0xFFFEE2E2;
     private static final int PINK = 0xFFEC4899;
     private static final int FUCHSIA = 0xFFD946EF;
@@ -70,7 +95,7 @@ public class MainActivity extends Activity {
     private static final int AURORA_TOP = 0xFFEDE9FE;
     private static final int AURORA_MID = 0xFFECFEFF;
     private static final int AURORA_BOT = 0xFFFCE7F3;
-    private static final int GLASS = 0xC8FFFFFF;
+    private static final int GLASS = 0xC7FFFFFF; // v3 .78 white
 
     // ---- Screens ----
     private static final int S_LOGIN = 0;
@@ -348,9 +373,7 @@ public class MainActivity extends Activity {
     private void buildShell() {
         root = new LinearLayout(this);
         root.setOrientation(LinearLayout.VERTICAL);
-        root.setBackground(new GradientDrawable(
-            GradientDrawable.Orientation.TL_BR,
-            new int[]{AURORA_TOP, AURORA_MID, AURORA_BOT}));
+        root.setBackgroundColor(V3_BODY_BG);
 
         topBar = new LinearLayout(this);
         topBar.setOrientation(LinearLayout.HORIZONTAL);
@@ -374,7 +397,7 @@ public class MainActivity extends Activity {
         // the main scroll area, so the composer sits at the screen bottom.
         threadPane = new LinearLayout(this);
         threadPane.setOrientation(LinearLayout.VERTICAL);
-        threadPane.setBackgroundColor(BG);
+        threadPane.setBackgroundColor(V3_BODY_BG);
         threadPane.setVisibility(View.GONE);
         root.addView(threadPane, new LinearLayout.LayoutParams(
             ViewGroup.LayoutParams.MATCH_PARENT, 0, 1f));
@@ -390,48 +413,102 @@ public class MainActivity extends Activity {
         setContentView(root);
     }
 
+    // v3 appbar title/subtitle per screen (title 16/800 white, sub 12 #E0E7FF).
+    private String[] appbarTitle() {
+        boolean admin = signedIn && FirebaseAuthHelper.isAdmin();
+        switch (screen) {
+            case S_DASH: return admin
+                ? new String[]{"অ্যাডমিন প্যানেল", "AutoMateIQ"}
+                : new String[]{"কাস্টমার প্যানেল", "AutoMateIQ"};
+            case S_ORDERS: return new String[]{"অর্ডার", admin ? "সব কাস্টমারের অর্ডার" : "আমার অর্ডার"};
+            case S_ORDER_DETAIL: return new String[]{"অর্ডার ডিটেইলস", ""};
+            case S_ORDER_FORM: return new String[]{"অর্ডার করুন", ""};
+            case S_RECHARGE_FORM: return new String[]{"রিচার্জ", ""};
+            case S_CUSTOMERS: return new String[]{"কাস্টমার", ""};
+            case S_CUSTOMER_DETAIL: return new String[]{"কাস্টমার ডিটেইলস", ""};
+            case S_PAGES: case S_CONNECT: return new String[]{"পেজ", "নিজের পেজ + কাস্টমার পেজ"};
+            case S_PAGE_FORM: return new String[]{"পেজ যোগ করুন", ""};
+            case S_LEADS: return new String[]{"লিডস", "মেসেঞ্জার থেকে আসা লিড"};
+            case S_LEAD_DETAIL: return new String[]{"লিড চ্যাট", ""};
+            case S_SERVICES: return new String[]{"সার্ভিস", "যাচাই করা দাম"};
+            case S_SERVICE_DETAIL: return new String[]{"সার্ভিস ডিটেইলস", ""};
+            case S_SUBS: case S_MY_SUB: return new String[]{"সাবস্ক্রিপশন", "আমার মেয়াদ"};
+            case S_TOKENS: return new String[]{"ওয়ালেট", "API ক্রেডিট রিচার্জ"};
+            default: return new String[]{"AutoMateIQ", ""};
+        }
+    }
     private void renderTopBar() {
         v3AnimIndex = 0;
+        if (screen == S_LOGIN || screen == S_PENDING) {
+            topBar.setVisibility(View.GONE);
+            return;
+        }
+        topBar.setVisibility(View.VISIBLE);
         topBar.removeAllViews();
-        TextView logo = new TextView(this);
-        logo.setText("A");
-        logo.setTextSize(20);
-        logo.setTypeface(Typeface.DEFAULT_BOLD);
-        logo.setTextColor(Color.WHITE);
-        logo.setGravity(Gravity.CENTER);
-        GradientDrawable lg = rounded(PRIMARY, 14);
-        logo.setBackground(lg);
-        LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(dp(40), dp(40));
-        topBar.addView(logo, lp);
-
+        // v3 .appbar: 120deg #6D28D9 -> #2563EB 55% -> #0891B2, padding 12/16.
+        GradientDrawable ab = new GradientDrawable(
+            GradientDrawable.Orientation.LEFT_RIGHT,
+            new int[]{V3_VIOLET_DARK, V3_BLUE, V3_CYAN_DARK});
+        topBar.setBackground(ab);
+        topBar.setElevation(0);
+        topBar.setPadding(dp(16), dp(12), dp(16), dp(12));
+        topBar.setGravity(Gravity.CENTER_VERTICAL);
+        if (!backStack.isEmpty()) {
+            ImageView back = iconView(iconRes("ic_back"), Color.WHITE);
+            back.setOnClickListener(new View.OnClickListener() {
+                @Override public void onClick(View v) { onBackPressed(); }
+            });
+            topBar.addView(back);
+        } else {
+            TextView logo = new TextView(this);
+            logo.setText("A");
+            logo.setTextSize(20);
+            logo.setTypeface(Typeface.DEFAULT_BOLD);
+            logo.setTextColor(Color.WHITE);
+            logo.setGravity(Gravity.CENTER);
+            GradientDrawable lg = rounded(0x38FFFFFF, 12);
+            lg.setStroke(dp(1), 0x80FFFFFF);
+            logo.setBackground(lg);
+            topBar.addView(logo, new LinearLayout.LayoutParams(dp(38), dp(38)));
+        }
         LinearLayout titles = new LinearLayout(this);
         titles.setOrientation(LinearLayout.VERTICAL);
-        titles.setPadding(dp(10), 0, 0, 0);
-        TextView t = text("AutoMateIQ", 18, TEXT, true);
-        String roleLabel = (!signedIn ? "মোবাইল ড্যাশবোর্ড • v8.0"
-            : (FirebaseAuthHelper.isAdmin() ? "অ্যাডমিন প্যানেল • v8.0" : "কাস্টমার প্যানেল • v8.0"));
-        TextView s = text(roleLabel, 12, TEXT2, false);
+        titles.setPadding(dp(10), 0, dp(10), 0);
+        String[] tt = appbarTitle();
+        TextView t = text(tt[0], 16, Color.WHITE, true);
         titles.addView(t);
-        titles.addView(s);
-        LinearLayout.LayoutParams tp = new LinearLayout.LayoutParams(0,
-            ViewGroup.LayoutParams.WRAP_CONTENT, 1f);
-        topBar.addView(titles, tp);
-
+        if (tt[1].length() > 0) titles.addView(text(tt[1], 12, 0xFFE0E7FF, false));
+        topBar.addView(titles, new LinearLayout.LayoutParams(0,
+            ViewGroup.LayoutParams.WRAP_CONTENT, 1f));
         if (signedIn) {
+            topBar.addView(iconView(iconRes("ic_bell"), Color.WHITE));
+            TextView av = new TextView(this);
+            av.setText("A");
+            av.setTextSize(16);
+            av.setTypeface(Typeface.DEFAULT_BOLD);
+            av.setTextColor(Color.WHITE);
+            av.setGravity(Gravity.CENTER);
+            GradientDrawable ag = new GradientDrawable(
+                GradientDrawable.Orientation.TL_BR, new int[]{0xFFF59E0B, V3_PINK});
+            ag.setCornerRadius(dp(19));
+            ag.setStroke(dp(2), 0xB3FFFFFF);
+            av.setBackground(ag);
+            LinearLayout.LayoutParams alp = new LinearLayout.LayoutParams(dp(38), dp(38));
+            alp.setMargins(dp(8), 0, dp(8), 0);
+            topBar.addView(av, alp);
             TextView out = new TextView(this);
             out.setText("লগআউট");
-            out.setTextSize(13);
+            out.setTextSize(12);
             out.setTypeface(Typeface.DEFAULT_BOLD);
-            out.setTextColor(RED);
+            out.setTextColor(Color.WHITE);
             out.setPadding(dp(10), dp(6), dp(10), dp(6));
-            out.setBackground(rounded(RED_SOFT, 20));
+            out.setBackground(rounded(0x33FFFFFF, 20));
             out.setOnClickListener(new View.OnClickListener() {
                 @Override public void onClick(View v) { logout(); }
             });
             topBar.addView(out);
         }
     }
-
     private void renderBottomNav() {
         bottomNav.removeAllViews();
         if (screen == S_LOGIN || screen == S_PENDING) {
@@ -439,19 +516,22 @@ public class MainActivity extends Activity {
             return;
         }
         bottomNav.setVisibility(View.VISIBLE);
-        // v7: nav differs by role — admin never sees purchase tabs,
-        // customer never sees admin tabs.
+        // v3 .nav: glass white .88, padding 9/6/11, label 11/700, unselected
+        // #94A3B8, selected tile 34x34 gradient violet->blue with glow.
+        bottomNav.setBackgroundColor(0xE0FFFFFF);
+        bottomNav.setElevation(0);
+        bottomNav.setPadding(dp(6), dp(9), dp(6), dp(11));
         boolean isAdminNav = signedIn && FirebaseAuthHelper.isAdmin();
         String[][] items = isAdminNav ? new String[][]{
             {"ic_home", "ড্যাশবোর্ড", String.valueOf(S_DASH)},
             {"ic_list", "অর্ডার", String.valueOf(S_ORDERS)},
             {"ic_users", "কাস্টমার", String.valueOf(S_CUSTOMERS)},
-            {"ic_page", "পেজ", String.valueOf(S_PAGES)},
+            {"ic_globe", "পেজ", String.valueOf(S_PAGES)},
             {"ic_chat", "লিডস", String.valueOf(S_LEADS)},
         } : new String[][]{
             {"ic_home", "হোম", String.valueOf(S_DASH)},
             {"ic_grid", "সার্ভিস", String.valueOf(S_SERVICES)},
-            {"ic_list", "অর্ডার", String.valueOf(S_ORDERS)},
+            {"ic_cart", "অর্ডার", String.valueOf(S_ORDERS)},
             {"ic_calendar", "সাবস্ক্রিপশন", String.valueOf(S_MY_SUB)},
             {"ic_wallet", "ওয়ালেট", String.valueOf(S_TOKENS)},
         };
@@ -460,9 +540,8 @@ public class MainActivity extends Activity {
             LinearLayout item = new LinearLayout(this);
             item.setOrientation(LinearLayout.VERTICAL);
             item.setGravity(Gravity.CENTER);
-            item.setPadding(dp(4), dp(6), dp(4), dp(6));
+            item.setPadding(dp(4), dp(2), dp(4), dp(2));
             boolean selected = screen == target
-                || (target == S_DASH && (screen == S_DASH))
                 || (target == S_LEADS && (screen == S_LEAD_DETAIL))
                 || (target == S_CUSTOMERS && (screen == S_CUSTOMER_DETAIL))
                 || (target == S_PAGES && (screen == S_PAGE_FORM))
@@ -472,27 +551,34 @@ public class MainActivity extends Activity {
                 || (target == S_SERVICES && (screen == S_SERVICE_DETAIL))
                 || (target == S_MY_SUB && (screen == S_SUBS))
                 || (target == S_TOKENS && (screen == S_RECHARGE_FORM));
-            if (selected) item.setBackground(rounded(SOFT_BLUE, 14));
-            else item.setBackground(rippleBackground());
-            ImageView icon = iconView(iconRes(it[0]), selected ? PRIMARY : TEXT2);
-            icon.setScaleType(ImageView.ScaleType.CENTER);
+            LinearLayout tile = new LinearLayout(this);
+            tile.setOrientation(LinearLayout.VERTICAL);
+            tile.setGravity(Gravity.CENTER);
+            if (selected) {
+                GradientDrawable tg = new GradientDrawable(
+                    GradientDrawable.Orientation.TL_BR, new int[]{V3_VIOLET, V3_BLUE});
+                tg.setCornerRadius(dp(11));
+                tile.setBackground(tg);
+                tile.setElevation(dp(4));
+            }
+            tile.setLayoutParams(new LinearLayout.LayoutParams(dp(34), dp(34)));
+            tile.addView(iconView(iconRes(it[0]), selected ? Color.WHITE : V3_NAV_GREY));
+            item.addView(tile);
             TextView label = new TextView(this);
             label.setText(it[1]);
             label.setTextSize(11);
             label.setTypeface(selected ? Typeface.DEFAULT_BOLD : Typeface.DEFAULT);
-            label.setTextColor(selected ? PRIMARY : TEXT2);
+            label.setTextColor(selected ? V3_VIOLET : V3_NAV_GREY);
             label.setGravity(Gravity.CENTER);
-            item.addView(icon);
+            label.setPadding(0, dp(2), 0, 0);
             item.addView(label);
             item.setOnClickListener(new View.OnClickListener() {
                 @Override public void onClick(View v) { go(target, false); }
             });
-            LinearLayout.LayoutParams ip = new LinearLayout.LayoutParams(
-                0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f);
-            bottomNav.addView(item, ip);
+            bottomNav.addView(item, new LinearLayout.LayoutParams(
+                0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f));
         }
     }
-
     private void render() {
         renderTopBar();
         renderBottomNav();
@@ -507,6 +593,15 @@ public class MainActivity extends Activity {
         }
         threadPane.setVisibility(View.GONE);
         scroll.setVisibility(View.VISIBLE);
+        if (screen == S_LOGIN) {
+            scroll.setBackground(new GradientDrawable(
+                GradientDrawable.Orientation.TL_BR,
+                new int[]{V3_LOGIN_TOP, V3_BLUE, V3_CYAN}));
+        } else {
+            scroll.setBackground(new GradientDrawable(
+                GradientDrawable.Orientation.TOP_BOTTOM,
+                new int[]{0xFFEEF2FF, 0xFFFDF2F8, 0xFFECFEFF}));
+        }
         content.removeAllViews();
         scroll.scrollTo(0, 0);
         if (notice != null) {
@@ -604,37 +699,47 @@ public class MainActivity extends Activity {
     // ---- v3: glass card background (semi-transparent white + light border) ----
     private GradientDrawable glassDrawable() {
         GradientDrawable d = new GradientDrawable();
-        d.setColor(GLASS);
-        d.setCornerRadius(dp(20));
-        d.setStroke(dp(1), BORDER);
+        d.setColor(V3_GLASS);
+        d.setCornerRadius(dp(22));
+        d.setStroke(dp(1), V3_GLASS_BORDER);
         return d;
     }
 
-    // ---- v3: gradient hero with slow colour shift (9-10s alternate) ----
+    // ---- v3: gradient hero, 3 stops, slow shift (gradShift 9-10s alternate) ----
+    // v3 heroCard: 125deg #6D28D9 -> #2563EB 45% -> #06B6D2 80%, radius 22.
+    // Android has no 125deg multi-stop animation, so the shift animates
+    // between the v3 palette and the v3 heroTop palette (#7C3AED/#2563EB/
+    // #06B6D2/#EC4899), keeping all stops inside the v3 family.
     private GradientDrawable heroShiftDrawable() {
         final GradientDrawable d = new GradientDrawable(
-            GradientDrawable.Orientation.TL_BR, new int[]{PRIMARY, VIOLET});
-        d.setCornerRadius(dp(20));
-        final int[][] stops = {{PRIMARY, VIOLET}, {VIOLET, PINK}, {PRIMARY, VIOLET}};
-        ValueAnimator anim = ValueAnimator.ofFloat(0f, 2f);
+            GradientDrawable.Orientation.LEFT_RIGHT,
+            new int[]{V3_VIOLET_DARK, V3_BLUE, V3_CYAN});
+        d.setCornerRadius(dp(22));
+        final int[][] stops = {{V3_VIOLET_DARK, V3_BLUE, V3_CYAN},
+                               {V3_VIOLET, V3_BLUE, V3_PINK}};
+        ValueAnimator anim = ValueAnimator.ofFloat(0f, 1f);
         anim.setDuration(9500);
         anim.setRepeatMode(ValueAnimator.REVERSE);
         anim.setRepeatCount(ValueAnimator.INFINITE);
         final ArgbEvaluator ev = new ArgbEvaluator();
         anim.addUpdateListener(new ValueAnimator.AnimatorUpdateListener() {
             @Override public void onAnimationUpdate(ValueAnimator a) {
-                float f = (Float) a.getAnimatedValue();
-                int seg = Math.min(1, (int) f);
-                float t = f - seg;
-                int c1 = (Integer) ev.evaluate(t, stops[seg][0], stops[seg + 1][0]);
-                int c2 = (Integer) ev.evaluate(t, stops[seg][1], stops[seg + 1][1]);
-                d.setColors(new int[]{c1, c2});
+                float t = (Float) a.getAnimatedValue();
+                d.setColors(new int[]{
+                    (Integer) ev.evaluate(t, stops[0][0], stops[1][0]),
+                    (Integer) ev.evaluate(t, stops[0][1], stops[1][1]),
+                    (Integer) ev.evaluate(t, stops[0][2], stops[1][2])});
             }
         });
         anim.start();
         return d;
     }
-
+    private GradientDrawable gradient3(int c1, int c2, int c3, int radiusDp) {
+        GradientDrawable d = new GradientDrawable(
+            GradientDrawable.Orientation.LEFT_RIGHT, new int[]{c1, c2, c3});
+        d.setCornerRadius(dp(radiusDp));
+        return d;
+    }
     // ---- v3: stepped progress (1 package -> 2 payment -> 3 verify) ----
     private LinearLayout stepProgress(int current) {
         String[] labels = {"প্যাকেজ", "পেমেন্ট", "যাচাই"};
@@ -668,7 +773,7 @@ public class MainActivity extends Activity {
         LinearLayout tile = new LinearLayout(this);
         tile.setOrientation(LinearLayout.VERTICAL);
         tile.setGravity(Gravity.CENTER);
-        tile.setBackground(gradient(PRIMARY, VIOLET));
+        tile.setBackground(gradientTile(iconName));
         LinearLayout.LayoutParams tlp = new LinearLayout.LayoutParams(dp(48), dp(48));
         tile.setLayoutParams(tlp);
         ImageView iv = iconView(iconRes(iconName), Color.WHITE);
@@ -683,20 +788,42 @@ public class MainActivity extends Activity {
         return item;
     }
 
+    // v3 gradient tiles per action (not one shared gradient):
+    // list=blue->cyan, users=violet->pink, page/globe=teal->cyan,
+    // chat=amber->pink, clock=rose->orange, default=violet->blue.
+    private GradientDrawable gradientTile(String iconName) {
+        int c1 = V3_VIOLET, c2 = V3_BLUE;
+        if ("ic_list".equals(iconName)) { c1 = V3_BLUE; c2 = V3_CYAN; }
+        else if ("ic_users".equals(iconName)) { c1 = V3_VIOLET; c2 = 0xFFDB2777; }
+        else if ("ic_page".equals(iconName) || "ic_globe".equals(iconName)) { c1 = 0xFF059669; c2 = V3_CYAN; }
+        else if ("ic_chat".equals(iconName)) { c1 = 0xFFF59E0B; c2 = V3_PINK; }
+        else if ("ic_clock".equals(iconName)) { c1 = TL_ROSE; c2 = 0xFFF97316; }
+        else if ("ic_calendar".equals(iconName)) { c1 = 0xFF4F46E5; c2 = 0xFF9333EA; }
+        else if ("ic_wallet".equals(iconName)) { c1 = 0xFFF59E0B; c2 = V3_PINK; }
+        GradientDrawable d = new GradientDrawable(
+            GradientDrawable.Orientation.TL_BR, new int[]{c1, c2});
+        d.setCornerRadius(dp(15));
+        return d;
+    }
     // ---- v3: timeline row (status dot + content) ----
     private View statusDot(int color) {
+        // v3 .tdot: 18px, 3px white border, shadow.
         View dot = new View(this);
-        dot.setBackground(rounded(color, 8));
-        LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(dp(12), dp(12));
-        lp.setMargins(0, dp(6), dp(10), 0);
+        GradientDrawable d = rounded(color, 9);
+        d.setStroke(dp(3), Color.WHITE);
+        dot.setBackground(d);
+        dot.setElevation(dp(2));
+        LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(dp(18), dp(18));
+        lp.setMargins(0, dp(2), dp(10), 0);
         dot.setLayoutParams(lp);
         return dot;
     }
     private int statusColor(String status) {
-        if ("in_progress".equals(status)) return PRIMARY;
-        if ("completed".equals(status)) return GREEN;
-        if ("cancelled".equals(status) || "rejected".equals(status)) return RED;
-        return AMBER;
+        // v3 timeline dot colours, not the v8 chip colours.
+        if ("in_progress".equals(status)) return V3_BLUE;
+        if ("completed".equals(status)) return TL_GREEN;
+        if ("cancelled".equals(status) || "rejected".equals(status)) return TL_ROSE;
+        return TL_AMBER_DOT;
     }
 
     // ---- v3: shimmer loading  (alpha pulse, 1.4s) ----
@@ -746,7 +873,14 @@ public class MainActivity extends Activity {
         tv.setTextSize(size);
         tv.setTextColor(color);
         tv.setTypeface(bengaliTypeface(bold));
-        if (size == 14) tv.setLineSpacing(0, 1.7f);
+        // v3 line-heights, applied at every size (v8 only did 14).
+        float lh = 1.5f;
+        if (size == 26) lh = 1.3f;
+        else if (size == 18) lh = 1.35f;
+        else if (size == 16) lh = 1.4f;
+        else if (size == 14) lh = 1.7f;
+        else if (size == 22) lh = 1.2f;
+        tv.setLineSpacing(0, lh);
         return tv;
     }
 
@@ -759,7 +893,7 @@ public class MainActivity extends Activity {
         c.setPadding(dp(16), dp(16), dp(16), dp(16));
         LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(
             ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT);
-        lp.setMargins(0, 0, 0, dp(14));
+        lp.setMargins(0, 0, 0, dp(12));
         c.setLayoutParams(lp);
         return c;
     }
@@ -771,29 +905,31 @@ public class MainActivity extends Activity {
     private TextView chip(String s, int bg, int fg) {
         TextView c = new TextView(this);
         c.setText(s);
-        c.setTextSize(11);
+        c.setTextSize(12);
         c.setTypeface(Typeface.DEFAULT_BOLD);
         c.setTextColor(fg);
-        c.setBackground(rounded(bg, 20));
-        c.setPadding(dp(10), dp(4), dp(10), dp(4));
+        c.setBackground(rounded(bg, 100));
+        c.setPadding(dp(11), dp(5), dp(11), dp(5));
         return c;
     }
 
     private TextView statusChip(LeadsStore.Lead lead) {
-        if (lead.paused) return chip(" হ্যান্ডওভার", AMBER_SOFT, AMBER);
-        if ("bot_replied".equals(lead.status)) return chip(" বট রিপ্লাই", GREEN_SOFT, GREEN);
-        return chip(" নতুন", SOFT_BLUE, PRIMARY);
+        if (lead.paused) return chip("হ্যান্ডওভার", AMBER_SOFT, AMBER);
+        if ("bot_replied".equals(lead.status)) return chip("বট রিপ্লাই", GREEN_SOFT, GREEN);
+        return chip("নতুন", SOFT_BLUE, PRIMARY);
     }
 
     private TextView primaryButton(String label, View.OnClickListener onClick) {
         TextView b = new TextView(this);
         b.setText(label);
-        b.setTextSize(16);
+        b.setTextSize(15);
         b.setTypeface(Typeface.DEFAULT_BOLD);
         b.setTextColor(Color.WHITE);
         b.setGravity(Gravity.CENTER);
-        b.setBackground(rounded(PRIMARY, 14));
-        b.setPadding(dp(16), dp(13), dp(16), dp(13));
+        // v3 .btn: 90deg #7C3AED -> #2563EB -> #06B6D2, radius 14, pad 14.
+        b.setBackground(gradient3(V3_VIOLET, V3_BLUE, V3_CYAN, 14));
+        b.setElevation(dp(6));
+        b.setPadding(dp(16), dp(14), dp(16), dp(14));
         b.setOnClickListener(onClick);
         pressScale(b);
         LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(
@@ -806,12 +942,14 @@ public class MainActivity extends Activity {
     private TextView outlineButton(String label, final int color, View.OnClickListener onClick) {
         TextView b = new TextView(this);
         b.setText(label);
-        b.setTextSize(15);
+        b.setTextSize(14);
         b.setTypeface(Typeface.DEFAULT_BOLD);
-        b.setTextColor(color);
+        // v3 .btn2: white .9, border rgba(167,139,250,.6), text #4F46E5,
+        // radius 14, pad 12. RED callers get the v3 danger style instead.
+        b.setTextColor(color == RED ? V3_DANGER_FG : V3_INDIGO_TEXT);
         b.setGravity(Gravity.CENTER);
-        GradientDrawable d = rounded(SURFACE, 14);
-        d.setStroke(dp(1), color);
+        GradientDrawable d = rounded(color == RED ? V3_DANGER_BG : 0xE6FFFFFF, 14);
+        d.setStroke(dp(1), color == RED ? V3_DANGER_BORDER : V3_INPUT_BORDER);
         b.setBackground(d);
         b.setPadding(dp(16), dp(12), dp(16), dp(12));
         b.setOnClickListener(onClick);
@@ -882,10 +1020,18 @@ public class MainActivity extends Activity {
     // showOrderForm() Step 2 and showRechargeForm().
     private LinearLayout paymentInfoCard() {
         LinearLayout c = card();
-        c.setBackground(rounded(SOFT_BLUE, 20));
+        // v3 .pay: 135deg rgba(255,255,255,.95) -> rgba(224,242,254,.95),
+        // 1.5px border rgba(34,211,238,.55), radius 18, padding 14.
+        GradientDrawable pd = new GradientDrawable(
+            GradientDrawable.Orientation.TL_BR, new int[]{0xF2FFFFFF, 0xF2E0F2FE});
+        pd.setCornerRadius(dp(18));
+        pd.setStroke(dp(1), 0x8C22D3EE);
+        c.setBackground(pd);
+        c.setPadding(dp(14), dp(14), dp(14), dp(14));
         c.addView(text("bKash/Nagad (Personal)", 16, NAVY, true));
-        TextView num = text(PAYMENT_NUMBER, 22, PRIMARY, true);
+        TextView num = text(PAYMENT_NUMBER, 22, TEXT, true);
         num.setTypeface(Typeface.create(Typeface.MONOSPACE, Typeface.BOLD));
+        num.setLetterSpacing(0.05f);
         num.setPadding(0, dp(6), 0, dp(2));
         c.addView(num);
         c.addView(text("এই নম্বরে টাকা পাঠান, তারপর নিচে আপনার Sender নম্বর + TrxID লিখুন।", 13, TEXT2, false));
@@ -906,12 +1052,41 @@ public class MainActivity extends Activity {
         a.setTypeface(Typeface.DEFAULT_BOLD);
         a.setTextColor(Color.WHITE);
         a.setGravity(Gravity.CENTER);
-        a.setBackground(rounded(color, 24));
+        a.setBackground(avatarGradient(color));
         LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(dp(48), dp(48));
         a.setLayoutParams(lp);
         return a;
     }
 
+    private GradientDrawable serviceTileGradient(String hex) {
+        int c1 = V3_VIOLET, c2 = V3_BLUE;
+        try {
+            int base = Color.parseColor(hex);
+            if (base == 0xFF2563EB || base == 0xFF1D4ED8) { c1 = V3_BLUE; c2 = V3_CYAN; }
+            else if (base == 0xFF8B5CF6) { c1 = 0xFF4F46E5; c2 = 0xFF9333EA; }
+            else if (base == 0xFF16A34A) { c1 = 0xFF059669; c2 = V3_CYAN; }
+            else if (base == 0xFFDC2626) { c1 = TL_ROSE; c2 = 0xFFF97316; }
+            else if (base == 0xFF06B6D2) { c1 = V3_BLUE; c2 = V3_CYAN; }
+            else if (base == 0xFFD97706) { c1 = 0xFFF59E0B; c2 = V3_PINK; }
+        } catch (Exception e) { }
+        GradientDrawable d = new GradientDrawable(
+            GradientDrawable.Orientation.TL_BR, new int[]{c1, c2});
+        d.setCornerRadius(dp(20));
+        return d;
+    }
+    // v3 avatars are gradients (g-blue/g-amber/g-rose/g-violet/g-teal/g-indigo).
+    private GradientDrawable avatarGradient(int color) {
+        int c1 = 0xFF4F46E5, c2 = 0xFF9333EA;
+        if (color == PRIMARY || color == 0xFF1D4ED8) { c1 = V3_BLUE; c2 = V3_CYAN; }
+        else if (color == AMBER || color == 0xFFD97706) { c1 = 0xFFF59E0B; c2 = V3_PINK; }
+        else if (color == RED) { c1 = TL_ROSE; c2 = 0xFFF97316; }
+        else if (color == VIOLET || color == 0xFF8B5CF6) { c1 = V3_VIOLET; c2 = 0xFFDB2777; }
+        else if (color == GREEN || color == 0xFF16A34A) { c1 = 0xFF059669; c2 = V3_CYAN; }
+        GradientDrawable d = new GradientDrawable(
+            GradientDrawable.Orientation.TL_BR, new int[]{c1, c2});
+        d.setCornerRadius(dp(24));
+        return d;
+    }
     // v5 PROFESSIONAL SHELL: a real Material-style ripple on tappable
     // rows, so taps feel like a commercial app instead of a dead layout.
     private RippleDrawable rippleBackground() {
@@ -925,12 +1100,13 @@ public class MainActivity extends Activity {
         bar.setOrientation(LinearLayout.HORIZONTAL);
         bar.setBackground(rounded(BORDER, 8));
         LinearLayout.LayoutParams blp = new LinearLayout.LayoutParams(
-            ViewGroup.LayoutParams.MATCH_PARENT, dp(10));
+            ViewGroup.LayoutParams.MATCH_PARENT, dp(9));
         blp.setMargins(0, dp(8), 0, dp(4));
         bar.setLayoutParams(blp);
         int p = Math.max(0, Math.min(100, percent));
         LinearLayout fill = new LinearLayout(this);
-        fill.setBackground(rounded(PRIMARY, 8));
+        // v3 progress fill: 90deg #7C3AED -> #EC4899 -> #06B6D2, grow 1s.
+        fill.setBackground(gradient3(V3_VIOLET, V3_PINK, V3_CYAN, 8));
         bar.addView(fill, new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.MATCH_PARENT, p));
         fill.setPivotX(0);
         fill.setScaleX(0f);
@@ -948,26 +1124,29 @@ public class MainActivity extends Activity {
         hero.setPadding(0, dp(24), 0, dp(8));
         TextView logo = new TextView(this);
         logo.setText("A");
-        logo.setTextSize(40);
+        logo.setTextSize(30);
         logo.setTypeface(Typeface.DEFAULT_BOLD);
         logo.setTextColor(Color.WHITE);
         logo.setGravity(Gravity.CENTER);
-        logo.setBackground(heroShiftDrawable());
-        LinearLayout.LayoutParams llp = new LinearLayout.LayoutParams(dp(88), dp(88));
+        // v3 login logo: 78px tile, radius 22, white .2 + white .6 border.
+        GradientDrawable lg2 = rounded(0x33FFFFFF, 22);
+        lg2.setStroke(dp(1), 0x99FFFFFF);
+        logo.setBackground(lg2);
+        LinearLayout.LayoutParams llp = new LinearLayout.LayoutParams(dp(78), dp(78));
         llp.gravity = Gravity.CENTER;
         hero.addView(logo, llp);
-        TextView name = text("AutoMateIQ", 28, NAVY, true);
+        TextView name = text("AutoMateIQ", 28, Color.WHITE, true);
         name.setGravity(Gravity.CENTER);
         name.setPadding(0, dp(14), 0, 0);
         hero.addView(name);
-        TextView tag = text("আপনার বিজনেস, আপনার হাতে — মোবাইল ড্যাশবোর্ড", 15, TEXT2, false);
+        TextView tag = text("আপনার ব্যবসার মেসেঞ্জার ড্যাশবোর্ড — মোবাইলে", 15, 0xFFE0E7FF, false);
         tag.setGravity(Gravity.CENTER);
         hero.addView(tag);
         content.addView(hero);
 
         LinearLayout c = card();
         c.setPadding(dp(20), dp(20), dp(20), dp(20));
-        c.addView(text("স্বাগতম", 20, TEXT, true));
+        c.addView(text("স্বাগতম", 22, TEXT, true));
         TextView sub = text("লগইন করলে আপনার পেজের লিড, সাবস্ক্রিপশন আর মেসেজ এখানেই দেখা যাবে।", 14, TEXT2, false);
         sub.setPadding(0, dp(6), 0, dp(12));
         c.addView(sub);
@@ -985,12 +1164,13 @@ public class MainActivity extends Activity {
         }
         TextView google = new TextView(this);
         google.setText("Google দিয়ে চালিয়ে যান");
-        google.setTextSize(16);
+        google.setTextSize(15);
         google.setTypeface(Typeface.DEFAULT_BOLD);
-        google.setTextColor(TEXT);
+        google.setTextColor(Color.WHITE);
         google.setGravity(Gravity.CENTER);
-        google.setBackground(roundedBorder(SURFACE, 14));
-        google.setElevation(dp(1));
+        // v3 login CTA: the gradient .btn (not a white outline button).
+        google.setBackground(gradient3(V3_VIOLET, V3_BLUE, V3_CYAN, 14));
+        google.setElevation(dp(6));
         google.setPadding(dp(16), dp(14), dp(16), dp(14));
         google.setOnClickListener(new View.OnClickListener() {
             @Override public void onClick(View v) {
@@ -1006,8 +1186,27 @@ public class MainActivity extends Activity {
         c.addView(google);
         content.addView(c);
 
-        
-        TextView about = text("অ্যাপ সম্পর্কে জানুন", 13, TEXT2, false);
+        // v3 login feature row: chat / cart / clock, 3 columns in a glass card.
+        LinearLayout feat = card();
+        LinearLayout frow = new LinearLayout(this);
+        frow.setOrientation(LinearLayout.HORIZONTAL);
+        String[][] feats = {{"ic_chat", "মেসেঞ্জার লিড"}, {"ic_cart", "অর্ডার"}, {"ic_clock", "সাবস্ক্রিপশন"}};
+        int[] fcol = {V3_VIOLET, V3_BLUE, V3_PINK};
+        for (int i = 0; i < feats.length; i++) {
+            LinearLayout fc = new LinearLayout(this);
+            fc.setOrientation(LinearLayout.VERTICAL);
+            fc.setGravity(Gravity.CENTER);
+            fc.addView(iconView(iconRes(feats[i][0]), fcol[i]));
+            TextView fl = text(feats[i][1], 11, TEXT2, false);
+            fl.setGravity(Gravity.CENTER);
+            fl.setPadding(0, dp(6), 0, 0);
+            fc.addView(fl);
+            frow.addView(fc, new LinearLayout.LayoutParams(0,
+                ViewGroup.LayoutParams.WRAP_CONTENT, 1f));
+        }
+        feat.addView(frow);
+        content.addView(feat);
+        TextView about = text("অ্যাপ সম্পর্কে জানুন", 13, 0xFFE0E7FF, false);
         about.setGravity(Gravity.CENTER);
         about.setPadding(0, dp(8), 0, 0);
         about.setOnClickListener(new View.OnClickListener() {
@@ -1056,53 +1255,6 @@ public class MainActivity extends Activity {
         hero.addView(text(who, 26, Color.WHITE, true));
         hero.addView(text("আজকের ড্যাশবোর্ড — লিড, হ্যান্ডওভার আর সাবস্ক্রিপশন এক নজরে", 14, Color.WHITE, false));
         content.addView(hero);
-
-        // v7 CUSTOMER stat grid: the customer home shows the
-        // customer's OWN orders, never leads (leads live in the admin
-        // panel). Counts come from the already role-filtered list.
-        int pendingN = 0, doneN = 0;
-        for (OrderStore.Order o : orders) {
-            if ("pending".equals(o.status)) pendingN++;
-            if ("completed".equals(o.status)) doneN++;
-        }
-        String[][] stats = {
-            {"ic_list", bn(String.valueOf(orders.size())), "মোট আমার অর্ডার"},
-            {"ic_clock", bn(String.valueOf(pendingN)), "অপেক্ষমাণ"},
-            {"ic_check", bn(String.valueOf(doneN)), "সম্পন্ন"},
-            {"ic_calendar", mySubscription == null ? "—" : bn(String.valueOf(mySubscription.daysRemaining())), "সাবস্ক্রিপশন দিন বাকি"},
-        };
-        for (int r = 0; r < 2; r++) {
-            LinearLayout row = new LinearLayout(this);
-            row.setOrientation(LinearLayout.HORIZONTAL);
-            for (int k = 0; k < 2; k++) {
-                final String[] st = stats[r * 2 + k];
-                LinearLayout sc = new LinearLayout(this);
-                sc.setOrientation(LinearLayout.VERTICAL);
-                sc.setBackground(rounded(SURFACE, 20));
-                sc.setElevation(dp(2));
-                sc.setPadding(dp(16), dp(14), dp(16), dp(14));
-                LinearLayout.LayoutParams slp = new LinearLayout.LayoutParams(
-                    0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f);
-                slp.setMargins(k == 0 ? 0 : dp(7), 0, k == 0 ? dp(7) : 0, dp(14));
-                sc.setLayoutParams(slp);
-                LinearLayout srow = new LinearLayout(this);
-                srow.setOrientation(LinearLayout.HORIZONTAL);
-                srow.setGravity(Gravity.CENTER_VERTICAL);
-                srow.addView(iconView(iconRes(st[0]), TEXT2));
-                TextView slab = text(st[2], 13, TEXT2, false);
-                slab.setPadding(dp(6), 0, 0, 0);
-                srow.addView(slab);
-                sc.addView(srow);
-                sc.addView(text(st[1], 26, NAVY, true));
-                sc.setOnClickListener(new View.OnClickListener() {
-                    @Override public void onClick(View v) {
-                        go(S_ORDERS, true);
-                    }
-                });
-                row.addView(sc);
-            }
-            content.addView(row);
-        }
 
         // Subscription card
         if (mySubscription != null) {
@@ -1155,17 +1307,19 @@ public class MainActivity extends Activity {
         for (final Service svc : SERVICES) {
             LinearLayout tile = new LinearLayout(this);
             tile.setOrientation(LinearLayout.VERTICAL);
-            tile.setGravity(Gravity.CENTER);
-            tile.setBackground(gradient(PRIMARY, VIOLET));
+            tile.setGravity(Gravity.TOP | Gravity.START);
+            tile.setBackground(serviceTileGradient(svc.color));
             tile.setPadding(dp(16), dp(16), dp(16), dp(16));
             LinearLayout.LayoutParams tlp = new LinearLayout.LayoutParams(dp(150), dp(110));
             tlp.setMargins(0, 0, dp(10), dp(14));
             tile.setLayoutParams(tlp);
             tile.addView(iconView(iconRes(svc.icon), Color.WHITE));
-            TextView tn = text(svc.name, 14, Color.WHITE, true);
-            tn.setGravity(Gravity.CENTER);
+            TextView tn = text(svc.name, 15, Color.WHITE, true);
             tn.setPadding(0, dp(8), 0, 0);
             tile.addView(tn);
+            TextView td = text(svc.desc, 12, 0xE0FFFFFF, false);
+            td.setPadding(0, dp(2), 0, 0);
+            tile.addView(td);
             tile.setOnClickListener(new View.OnClickListener() {
                 @Override public void onClick(View v) { currentService = svc; go(S_SERVICE_DETAIL, true); }
             });
@@ -1177,28 +1331,6 @@ public class MainActivity extends Activity {
         content.addView(primaryButton("নতুন অর্ডার করুন", new View.OnClickListener() {
             @Override public void onClick(View v) { selectedPackage = null; go(S_ORDER_FORM, true); }
         }));
-
-        // CUSTOMER quick actions: no leads, no connect — those
-        // live in the admin panel.
-        LinearLayout qc = card();
-        qc.addView(text("দ্রুত কাজ", 16, TEXT, true));
-        qc.addView(outlineButton(" সার্ভিস দেখুন", PRIMARY, new View.OnClickListener() {
-            @Override public void onClick(View v) { go(S_SERVICES, true); }
-        }));
-        qc.addView(outlineButton(" অর্ডার করুন", PRIMARY, new View.OnClickListener() {
-            @Override public void onClick(View v) { selectedPackage = null; go(S_ORDER_FORM, true); }
-        }));
-        qc.addView(outlineButton(" আমার অর্ডার দেখুন", PRIMARY, new View.OnClickListener() {
-            @Override public void onClick(View v) { go(S_ORDERS, true); }
-        }));
-        qc.addView(outlineButton(" আমার সাবস্ক্রিপশন দেখুন", PRIMARY, new View.OnClickListener() {
-            @Override public void onClick(View v) { go(S_MY_SUB, true); }
-        }));
-        qc.addView(outlineButton(" টোকেন কিনুন", PRIMARY, new View.OnClickListener() {
-            @Override public void onClick(View v) { go(S_TOKENS, true); }
-        }));
-        
-        content.addView(qc);
 
         // v7 CUSTOMER recent: own orders, never leads.
         LinearLayout recent = card();
@@ -1446,6 +1578,12 @@ public class MainActivity extends Activity {
         threadMessages = new LinearLayout(this);
         threadMessages.setOrientation(LinearLayout.VERTICAL);
         threadMessages.setPadding(dp(16), dp(8), dp(16), dp(8));
+        if (lead.paused) {
+            LinearLayout pb = card();
+            pb.setBackground(rounded(AMBER_SOFT, 14));
+            pb.addView(text("বট এখন থেমে আছে। আপনি নিজে উত্তর দিচ্ছেন। বট আবার চালু করতে Resume AI চাপুন।", 14, TEXT, true));
+            threadMessages.addView(pb);
+        }
         if (lead.messages.isEmpty()) {
             LinearLayout empty = card();
             empty.addView(text("এই লিডের এখনো কোনো মেসেজ দেখা যাচ্ছে না। নিচে লিখে প্রথম রিপ্লাই পাঠান।", 14, TEXT2, false));
@@ -1464,12 +1602,22 @@ public class MainActivity extends Activity {
             wrap.addView(role);
             TextView bubble = new TextView(this);
             bubble.setText(m.text);
-            bubble.setTextSize(15);
+            bubble.setTextSize(14);
             bubble.setTextColor(isOwner ? Color.WHITE : TEXT);
-            bubble.setPadding(dp(14), dp(10), dp(14), dp(10));
-            bubble.setBackground(rounded(isOwner ? PRIMARY : isBot ? SOFT_BLUE : SURFACE, 16));
-            if (!isOwner && !isBot) {
-                bubble.setBackground(roundedBorder(SURFACE, 16));
+            bubble.setPadding(dp(14), dp(11), dp(14), dp(11));
+            // v3 bubbles: radius 19 (bottom corner 5 on the tail side is
+            // approximated by the 19 radius — Android TextView corners are
+            // uniform), owner = violet->blue gradient, bot = #E0F2FE/border.
+            if (isOwner) {
+                bubble.setBackground(gradient3(V3_VIOLET, V3_BLUE, V3_BLUE, 19));
+            } else if (isBot) {
+                GradientDrawable bd = rounded(V3_BOT_BG, 19);
+                bd.setStroke(dp(1), V3_BOT_BORDER);
+                bubble.setBackground(bd);
+            } else {
+                GradientDrawable ld = rounded(0xE6FFFFFF, 19);
+                ld.setStroke(dp(1), V3_GLASS_BORDER);
+                bubble.setBackground(ld);
             }
             bubble.setGravity((isOwner || isBot) ? Gravity.END : Gravity.START);
             wrap.addView(bubble);
@@ -1517,37 +1665,33 @@ public class MainActivity extends Activity {
         // adjustResize (see AndroidManifest) so it stays visible.
         LinearLayout comp = new LinearLayout(this);
         comp.setOrientation(LinearLayout.VERTICAL);
-        comp.setBackgroundColor(SURFACE);
-        comp.setElevation(dp(8));
-        comp.setPadding(dp(16), dp(12), dp(16), dp(12));
-        TextView info = text("এখানে লিখলে মেসেজ সরাসরি কাস্টমারের Messenger-এ যাবে। "
-            + "লেখার সাথে সাথে এই লিডের বট থেমে যাবে — বট আবার চালু করতে উপরের Resume AI চাপুন।",
-            13, TEXT2, false);
-        info.setPadding(0, 0, 0, dp(8));
-        comp.addView(info);
+        comp.setBackgroundColor(0xD9FFFFFF);
+        comp.setElevation(0);
+        comp.setPadding(dp(12), dp(12), dp(12), dp(12));
         LinearLayout row = new LinearLayout(this);
         row.setOrientation(LinearLayout.HORIZONTAL);
         row.setGravity(Gravity.CENTER_VERTICAL);
         threadInput = new EditText(this);
         threadInput.setHint("রিপ্লাই লিখুন…");
-        threadInput.setTextSize(15);
+        threadInput.setTextSize(14);
         threadInput.setInputType(InputType.TYPE_CLASS_TEXT | InputType.TYPE_TEXT_FLAG_MULTI_LINE);
-        threadInput.setMinLines(2);
-        threadInput.setBackground(roundedBorder(SOFT, 12));
-        threadInput.setPadding(dp(12), dp(10), dp(12), dp(10));
+        threadInput.setMinLines(1);
+        threadInput.setBackground(roundedBorder(0xFFFFFFFF, 100));
+        threadInput.setPadding(dp(15), dp(12), dp(15), dp(12));
         LinearLayout.LayoutParams ip = new LinearLayout.LayoutParams(
             0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f);
         row.addView(threadInput, ip);
-        TextView send = new TextView(this);
-        send.setText("পাঠান");
-        send.setTextSize(15);
-        send.setTypeface(Typeface.DEFAULT_BOLD);
-        send.setTextColor(Color.WHITE);
-        send.setGravity(Gravity.CENTER);
-        send.setBackground(rounded(PRIMARY, 12));
-        send.setPadding(dp(16), dp(12), dp(16), dp(12));
-        LinearLayout.LayoutParams slp = new LinearLayout.LayoutParams(
-            ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT);
+        // v3 send: 46px circle, gradient pink->violet, white send icon, glow.
+        ImageView send = new ImageView(this);
+        GradientDrawable sg = new GradientDrawable(
+            GradientDrawable.Orientation.TL_BR, new int[]{V3_PINK, V3_VIOLET});
+        sg.setCornerRadius(dp(23));
+        send.setBackground(sg);
+        send.setElevation(dp(6));
+        send.setImageResource(iconRes("ic_send"));
+        send.setColorFilter(Color.WHITE);
+        send.setScaleType(ImageView.ScaleType.CENTER);
+        LinearLayout.LayoutParams slp = new LinearLayout.LayoutParams(dp(46), dp(46));
         slp.setMargins(dp(8), 0, 0, 0);
         send.setLayoutParams(slp);
         send.setOnClickListener(new View.OnClickListener() {
@@ -1806,28 +1950,39 @@ public class MainActivity extends Activity {
                 @Override public void onClick(View v) { selectedPackage = null; go(S_ORDER_FORM, true); }
             }));
         }
-        // Status filter chips
-        LinearLayout filters = card();
-        filters.addView(text("ফিল্টার", 15, TEXT, true));
+        // v3 orders filter: horizontal chip rail (not a vertical list card).
+        HorizontalScrollView fscroll = new HorizontalScrollView(this);
+        fscroll.setHorizontalScrollBarEnabled(false);
+        LinearLayout frail = new LinearLayout(this);
+        frail.setOrientation(LinearLayout.HORIZONTAL);
+        frail.setPadding(0, 0, 0, dp(10));
         String[][] fdefs = {{"all", "সব"}, {"pending", "অপেক্ষমাণ"},
             {"in_progress", "চলমান"}, {"completed", "সম্পন্ন"}, {"cancelled", "বাতিল"}};
         for (final String[] f : fdefs) {
             final String key = f[0];
-            LinearLayout row = new LinearLayout(this);
-            row.setOrientation(LinearLayout.HORIZONTAL);
-            row.setGravity(Gravity.CENTER_VERTICAL);
-            row.setPadding(0, dp(4), 0, dp(4));
-            TextView lbl = text((orderFilter.equals(key) ? " " : "○ ") + f[1], 15,
-                orderFilter.equals(key) ? PRIMARY : TEXT, orderFilter.equals(key));
-            row.addView(lbl);
-            row.setBackground(rippleBackground());
-            row.setClickable(true);
-            row.setOnClickListener(new View.OnClickListener() {
+            TextView ch = new TextView(this);
+            ch.setText(f[1]);
+            ch.setTextSize(12);
+            ch.setTypeface(Typeface.DEFAULT_BOLD);
+            ch.setPadding(dp(11), dp(5), dp(11), dp(5));
+            if (orderFilter.equals(key)) {
+                ch.setTextColor(Color.WHITE);
+                ch.setBackground(gradient3(V3_VIOLET, V3_BLUE, V3_CYAN, 100));
+            } else {
+                ch.setTextColor(V3_GREY_FG);
+                ch.setBackground(rounded(0xD9FFFFFF, 100));
+            }
+            LinearLayout.LayoutParams clp = new LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT);
+            clp.setMargins(0, 0, dp(8), 0);
+            ch.setLayoutParams(clp);
+            ch.setOnClickListener(new View.OnClickListener() {
                 @Override public void onClick(View v) { orderFilter = key; render(); }
             });
-            filters.addView(row);
+            frail.addView(ch);
         }
-        content.addView(filters);
+        fscroll.addView(frail);
+        content.addView(fscroll);
         if (ordersLoading) {
             content.addView(shimmerBar());
             content.addView(shimmerBar());
@@ -2363,21 +2518,20 @@ public class MainActivity extends Activity {
                 final Service s = SERVICES[i + k];
                 LinearLayout c = new LinearLayout(this);
                 c.setOrientation(LinearLayout.VERTICAL);
-                c.setBackground(rounded(SURFACE, 20));
-                c.setElevation(dp(2));
+                c.setBackground(serviceTileGradient(s.color));
+                c.setElevation(dp(4));
                 c.setPadding(dp(14), dp(14), dp(14), dp(14));
                 LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(
                     0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f);
                 lp.setMargins(k == 0 ? 0 : dp(7), 0, k == 0 ? dp(7) : 0, dp(14));
                 c.setLayoutParams(lp);
-                ImageView icon = iconView(iconRes(s.icon), TEXT);
+                ImageView icon = iconView(iconRes(s.icon), Color.WHITE);
                 c.addView(icon);
-                c.addView(text(s.name, 16, TEXT, true));
-                TextView d = text(s.desc, 13, TEXT2, false);
+                c.addView(text(s.name, 15, Color.WHITE, true));
+                TextView d = text(s.from, 12, 0xE0FFFFFF, false);
                 d.setMaxLines(3);
                 d.setPadding(0, dp(4), 0, dp(8));
                 c.addView(d);
-                c.addView(chip(s.from, SOFT_BLUE, PRIMARY));
                 c.setOnClickListener(new View.OnClickListener() {
                     @Override public void onClick(View v) {
                         currentService = s;
@@ -2654,81 +2808,61 @@ public class MainActivity extends Activity {
     }
 
     private void showAdminDashboard() {
+        // v3 admin dashboard: greeting (not a separate "Admin panel" hero),
+        // then ONE heroCard holding the connected Page + 3 inline stats.
+        content.addView(text("শুভ সকাল", 26, TEXT, true));
+        TextView gsub = text("আজ আপনার ব্যবসার সারাংশ এক নজরে দেখুন।", 14, TEXT2, false);
+        gsub.setPadding(0, 0, 0, dp(12));
+        content.addView(gsub);
+        int activeSubs0 = 0;
+        for (OrderStore.Order o : orders) {
+            if (!o.isMonthly()) continue;
+            if (!monthlyExpired(o) && !"cancelled".equals(o.status) && !"rejected".equals(o.status)) activeSubs0++;
+        }
         LinearLayout hero = new LinearLayout(this);
         hero.setOrientation(LinearLayout.VERTICAL);
         hero.setBackground(heroShiftDrawable());
-        hero.setElevation(dp(2));
-        hero.setPadding(dp(20), dp(20), dp(20), dp(20));
+        hero.setPadding(dp(16), dp(16), dp(16), dp(16));
         LinearLayout.LayoutParams hlp = new LinearLayout.LayoutParams(
             ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT);
-        hlp.setMargins(0, 0, 0, dp(14));
+        hlp.setMargins(0, 0, 0, dp(12));
         hero.setLayoutParams(hlp);
-        hero.addView(text("অ্যাডমিন প্যানেল", 26, Color.WHITE, true));
-        hero.addView(text("কানেক্টেড পেজ, কাস্টমার, অর্ডার আর সাবস্ক্রিপশন — এক নজরে", 14, Color.WHITE, false));
+        LinearLayout htop = new LinearLayout(this);
+        htop.setOrientation(LinearLayout.HORIZONTAL);
+        htop.setGravity(Gravity.CENTER_VERTICAL);
+        LinearLayout htxt = new LinearLayout(this);
+        htxt.setOrientation(LinearLayout.VERTICAL);
+        htxt.addView(text("কানেক্ট করা পেজ", 11, 0xFFE0E7FF, true));
+        htxt.addView(text("AutoMateIQ", 19, Color.WHITE, true));
+        htxt.addView(text("facebook.com/automateiq.xyz", 11, 0xFFE0E7FF, false));
+        htop.addView(htxt, new LinearLayout.LayoutParams(0,
+            ViewGroup.LayoutParams.WRAP_CONTENT, 1f));
+        htop.addView(chip("Connected", GREEN_SOFT, GREEN));
+        hero.addView(htop);
+        LinearLayout srow = new LinearLayout(this);
+        srow.setOrientation(LinearLayout.HORIZONTAL);
+        srow.setPadding(0, dp(14), 0, 0);
+        String[][] hs = {
+            {usersLoaded ? bn(String.valueOf(users.size())) : "—", "মোট ইউজার"},
+            {bn(String.valueOf(orders.size())), "মোট অর্ডার"},
+            {bn(String.valueOf(activeSubs0)), "অ্যাক্টিভ"},
+        };
+        for (String[] st : hs) {
+            LinearLayout sc = new LinearLayout(this);
+            sc.setOrientation(LinearLayout.VERTICAL);
+            sc.addView(text(st[0], 22, Color.WHITE, true));
+            sc.addView(text(st[1], 11, 0xFFE0E7FF, false));
+            srow.addView(sc, new LinearLayout.LayoutParams(0,
+                ViewGroup.LayoutParams.WRAP_CONTENT, 1f));
+        }
+        hero.addView(srow);
         content.addView(hero);
-
-        // Connected Page card (AutoMateIQ's own Page — never auto-stopped).
-        LinearLayout pc = card();
-        pc.addView(text(" কানেক্টেড পেজ — AutoMateIQ", 16, TEXT, true));
-        LinearLayout prow = new LinearLayout(this);
-        prow.setOrientation(LinearLayout.HORIZONTAL);
-        prow.setPadding(0, dp(8), 0, 0);
-        prow.addView(chip(" কানেক্টেড", GREEN_SOFT, GREEN));
-        pc.addView(prow);
-        pc.addView(text("পেজ: facebook.com/automateiq.xyz", 14, TEXT, false));
-        pc.addView(text("Page ID: 825495483971307", 13, TEXT2, false));
-        TextView pn = text("কানেক্টেড পেজের মেসেজ লিডসে দেখা যাবে।", 13, TEXT2, false);
-        pn.setPadding(0, dp(6), 0, 0);
-        pc.addView(pn);
-        
-        pc.addView(outlineButton("কাস্টমার পেজ দেখুন", PRIMARY, new View.OnClickListener() {
-            @Override public void onClick(View v) { go(S_PAGES, true); }
-        }));
-        content.addView(pc);
-
         // Admin stats: users, orders, active subs, expired.
         int activeSubs = 0, expiredN = 0;
         for (OrderStore.Order o : orders) {
             if (!o.isMonthly()) continue;
             if (monthlyExpired(o)) expiredN++;
             else if (!"cancelled".equals(o.status) && !"rejected".equals(o.status)) activeSubs++;
-        }
-        String[][] stats = {
-            {"ic_users", usersLoaded ? bn(String.valueOf(users.size())) : "—", "মোট ইউজার"},
-            {"ic_list", bn(String.valueOf(orders.size())), "মোট অর্ডার"},
-            {"ic_check", bn(String.valueOf(activeSubs)), "চালু সাবস্ক্রিপশন"},
-            {"ic_clock", bn(String.valueOf(expiredN)), "মেয়াদ শেষ"},
-        };
-        for (int r = 0; r < 2; r++) {
-            LinearLayout row = new LinearLayout(this);
-            row.setOrientation(LinearLayout.HORIZONTAL);
-            for (int k = 0; k < 2; k++) {
-                final String[] st = stats[r * 2 + k];
-                final int target = (r == 0 && k == 0) ? S_CUSTOMERS : S_ORDERS;
-                LinearLayout sc = new LinearLayout(this);
-                sc.setOrientation(LinearLayout.VERTICAL);
-                sc.setBackground(rounded(SURFACE, 20));
-                sc.setElevation(dp(2));
-                sc.setPadding(dp(16), dp(14), dp(16), dp(14));
-                LinearLayout.LayoutParams slp = new LinearLayout.LayoutParams(
-                    0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f);
-                slp.setMargins(k == 0 ? 0 : dp(7), 0, k == 0 ? dp(7) : 0, dp(14));
-                sc.setLayoutParams(slp);
-                LinearLayout srow = new LinearLayout(this);
-                srow.setOrientation(LinearLayout.HORIZONTAL);
-                srow.setGravity(Gravity.CENTER_VERTICAL);
-                srow.addView(iconView(iconRes(st[0]), TEXT2));
-                TextView slab = text(st[2], 13, TEXT2, false);
-                slab.setPadding(dp(6), 0, 0, 0);
-                srow.addView(slab);
-                sc.addView(srow);
-                sc.addView(text(st[1], 26, NAVY, true));
-                sc.setOnClickListener(new View.OnClickListener() {
-                    @Override public void onClick(View v) { go(target, true); }
-                });
-                row.addView(sc);
-            }
-            content.addView(row);
         }
         if (autoExpireCount > 0) {
             content.addView(bannerCard(" " + bn(String.valueOf(autoExpireCount)) + "টি মাসিক অর্ডারের অফার শেষ হয়েছে — স্বয়ংক্রিয়ভাবে বাতিল করা হয়েছে।", AMBER_SOFT, AMBER));
@@ -2764,7 +2898,7 @@ public class MainActivity extends Activity {
 
         // Recent orders.
         LinearLayout recent = card();
-        recent.addView(text("সাম্প্রতিক অর্ডার", 16, TEXT, true));
+        recent.addView(text("সাম্প্রতিক কার্যক্রম", 18, TEXT, true));
         if (ordersLoading) {
             recent.addView(text("লোড হচ্ছে…", 14, TEXT2, false));
         } else if (ordersError != null) {
@@ -2780,8 +2914,9 @@ public class MainActivity extends Activity {
                 rrow.setPadding(0, dp(8), 0, dp(8));
                 LinearLayout mid = new LinearLayout(this);
                 mid.setOrientation(LinearLayout.VERTICAL);
-                mid.addView(text(ro.serviceName + " • " + ro.amount, 15, TEXT, true));
-                mid.addView(text("কাস্টমার: " + ro.userName, 13, TEXT2, false));
+                mid.addView(text(ro.serviceName, 16, TEXT, true));
+                mid.addView(text(ro.amount + " • কাস্টমার: " + ro.userName, 14, TEXT2, false));
+                mid.addView(text("অর্ডার", 11, TEXT2, false));
                 LinearLayout.LayoutParams rmp = new LinearLayout.LayoutParams(
                     0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f);
                 rrow.addView(statusDot(statusColor(ro.status)));
@@ -3215,7 +3350,7 @@ public class MainActivity extends Activity {
         content.addView(f);
         
         
-        TextView ver = text("ভার্সন 8.0 • অ্যাডমিন প্যানেল / কাস্টমার প্যানেল আলাদা", 12, TEXT2, false);
+        TextView ver = text("ভার্সন 8.1", 12, TEXT2, false);
         ver.setGravity(Gravity.CENTER);
         ver.setPadding(0, dp(8), 0, 0);
         content.addView(ver);
