@@ -58,5 +58,5 @@ dependencies {
     // re-resolving the already-verified v8.1 set).
     implementation 'com.google.firebase:firebase-messaging:24.0.2'
     implementation 'androidx.work:work-runtime:2.9.0'
-    implementation 'com.google.guava:listenablefuture:1.0'
+    implementation 'com.google.guava:guava:31.1-android'
 }
