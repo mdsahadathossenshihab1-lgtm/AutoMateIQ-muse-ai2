@@ -1,0 +1,25 @@
+name: Print APK SHA-1 (temporary)
+
+on:
+  workflow_dispatch:
+
+permissions:
+  actions: read
+  contents: read
+
+jobs:
+  sha1:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+      - name: Download built APK artifact from run 41366727536
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh run download 41366727536 -n automateiq-app-debug -D apk
+          ls -l apk
+      - name: Print APK certificate fingerprints
+        run: keytool -printcert -jarfile apk/app-debug.apk
