@@ -12,5 +12,5 @@
     <dimen name="nav_icon">22dp</dimen>
     <dimen name="tile_icon">24dp</dimen>
     <dimen name="inline_icon">18dp</dimen>
-    <dimen name="card_radius">20dp</dimen>
+    <dimen name="card_radius">22dp</dimen>
 </resources>
